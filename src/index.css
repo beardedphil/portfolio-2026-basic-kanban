@@ -129,6 +129,11 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-height: 2rem;
+}
+.column-cards-over {
+  background: #e8f4fc;
+  border-radius: 4px;
 }
 .ticket-card {
   padding: 0.5rem 0.6rem;
