@@ -18,5 +18,5 @@
 - Created `docs/audit/0005-prevent-duplicate-column-titles/` with plan, worklog, changed-files, decisions, verification.
 
 ## Commit and push
-- Pushed commit: `c62fc8d`
+- Pushed commits: `c62fc8d` (feat), `c3a1c5c` (worklog).
 - `git status -sb`: `## main...origin/main`
