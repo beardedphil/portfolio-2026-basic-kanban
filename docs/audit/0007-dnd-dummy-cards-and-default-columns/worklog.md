@@ -28,5 +28,5 @@
 - Build passes. First load shows To-do, Doing, Done with 3 cards each. Debug panel shows column order and cards per column. DnD requires manual pointer drag (in-app verification only).
 
 ## Commit and push
-- Commit: `2cd6f1e`
-- `git status -sb` (when ready): `## main...origin/main` (after push)
+- Commits: `2cd6f1e` (feat), `bf2ae58` (worklog hash).
+- `git status -sb` (when ready): `## main...origin/main`
