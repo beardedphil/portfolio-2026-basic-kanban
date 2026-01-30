@@ -38,6 +38,16 @@ Create a task folder under `docs/audit/`:
   - Human-verifiable steps **inside the app UI** (no console/devtools).
   - If verification involves visuals, include screenshot filenames.
 
+## Artifact Format: Source of Truth (No “Copy From Old Audits”)
+
+- The source of truth for artifact **format and required files** is:
+  - `.cursor/rules/*.mdc` (workspace rules)
+  - `docs/templates/ticket.template.md`
+  - `docs/process/ticket-verification-rules.md`
+- Do **not** determine artifact format by inspecting prior folders in `docs/audit/`.
+  - You may reference older audits only as **examples** after you have already checked the rules/templates.
+  - Avoid narration like “Checking an existing audit folder for format”; instead confirm you are following the rules/templates above.
+
 ## Ready-for-Verification (Commit + Push)
 
 - An implementation agent must **commit** all work for the ticket and **push** it to the remote before claiming the ticket is “done” or “ready for verification.”
