@@ -1365,7 +1365,6 @@ function App() {
         onDragEnd={handleDragEnd}
       >
         <section className="columns-section" aria-label="Columns">
-          <h2>Columns</h2>
           {!ticketStoreConnected && !supabaseBoardActive && (
             <>
               <button

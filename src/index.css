@@ -14,8 +14,6 @@ body {
 #root {
   min-height: 100vh;
   padding: 2rem;
-  max-width: 640px;
-  margin: 0 auto;
 }
 
 h1 {
@@ -80,10 +78,6 @@ h1 {
 /* Columns section */
 .columns-section {
   margin-bottom: 1.5rem;
-}
-.columns-section h2 {
-  font-size: 1.1rem;
-  margin: 0 0 0.5rem 0;
 }
 .add-column-btn {
   margin-bottom: 0.75rem;
