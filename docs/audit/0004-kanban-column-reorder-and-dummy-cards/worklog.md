@@ -27,4 +27,5 @@
 - Created `docs/audit/0004-kanban-column-reorder-and-dummy-cards/` with plan, worklog, changed-files, decisions, verification.
 
 ## Commit and push
-- (To be filled when ready: commit hash + `git status -sb` output)
+- Pushed commit: `2e99c3e`
+- `git status -sb`: `## main...origin/main`
