@@ -30,6 +30,8 @@ type LogEntry = { id: number; message: string; at: string }
 type Card = { id: string; title: string }
 type Column = { id: string; title: string; cardIds: string[] }
 
+type TicketFile = { name: string; path: string }
+
 const DEFAULT_COLUMNS: Column[] = [
   { id: 'col-todo', title: 'To-do', cardIds: ['c-1', 'c-2', 'c-3'] },
   { id: 'col-doing', title: 'Doing', cardIds: ['c-4', 'c-5', 'c-6'] },
@@ -161,6 +163,87 @@ function App() {
   const [addColumnError, setAddColumnError] = useState<string | null>(null)
   const [activeCardId, setActiveCardId] = useState<UniqueIdentifier | null>(null)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
+
+  // Ticket Store (Docs read-only)
+  const [ticketStoreConnected, setTicketStoreConnected] = useState(false)
+  const [ticketStoreRootHandle, setTicketStoreRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
+  const [ticketStoreFiles, setTicketStoreFiles] = useState<TicketFile[]>([])
+  const [ticketStoreLastRefresh, setTicketStoreLastRefresh] = useState<Date | null>(null)
+  const [ticketStoreLastError, setTicketStoreLastError] = useState<string | null>(null)
+  const [ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
+  const [selectedTicketPath, setSelectedTicketPath] = useState<string | null>(null)
+  const [selectedTicketContent, setSelectedTicketContent] = useState<string | null>(null)
+  const [ticketViewerLoading, setTicketViewerLoading] = useState(false)
+
+  const refreshTicketStore = useCallback(async (root: FileSystemDirectoryHandle) => {
+    setTicketStoreLastError(null)
+    try {
+      const docs = await root.getDirectoryHandle('docs')
+      const tickets = await docs.getDirectoryHandle('tickets')
+      const files: TicketFile[] = []
+      for await (const [name, entry] of tickets.entries()) {
+        if (entry.kind === 'file' && name.endsWith('.md')) {
+          files.push({ name, path: `docs/tickets/${name}` })
+        }
+      }
+      files.sort((a, b) => a.name.localeCompare(b.name))
+      setTicketStoreFiles(files)
+      setTicketStoreLastRefresh(new Date())
+    } catch {
+      setTicketStoreLastError('No `docs/tickets` folder found.')
+      setTicketStoreFiles([])
+      setTicketStoreLastRefresh(new Date())
+    }
+  }, [])
+
+  const handleConnectProject = useCallback(async () => {
+    setTicketStoreConnectMessage(null)
+    if (typeof window.showDirectoryPicker !== 'function') {
+      setTicketStoreLastError('Folder picker not supported in this browser.')
+      return
+    }
+    try {
+      const root = await window.showDirectoryPicker()
+      setTicketStoreConnected(true)
+      setTicketStoreRootHandle(root)
+      await refreshTicketStore(root)
+    } catch (e) {
+      const err = e as { name?: string }
+      if (err.name === 'AbortError') {
+        setTicketStoreConnectMessage('Connect cancelled.')
+        return
+      }
+      setTicketStoreLastError(err instanceof Error ? err.message : 'Failed to open folder.')
+    }
+  }, [refreshTicketStore])
+
+  const handleSelectTicket = useCallback(
+    async (path: string, name: string) => {
+      const root = ticketStoreRootHandle
+      if (!root) return
+      setSelectedTicketPath(path)
+      setTicketViewerLoading(true)
+      setSelectedTicketContent(null)
+      try {
+        const docs = await root.getDirectoryHandle('docs')
+        const tickets = await docs.getDirectoryHandle('tickets')
+        const fileHandle = await tickets.getFileHandle(name)
+        const file = await fileHandle.getFile()
+        const text = await file.text()
+        setSelectedTicketContent(text)
+      } catch {
+        setSelectedTicketContent('(Failed to read file.)')
+      } finally {
+        setTicketViewerLoading(false)
+      }
+    },
+    [ticketStoreRootHandle]
+  )
+
+  const handleRefreshTickets = useCallback(async () => {
+    const root = ticketStoreRootHandle
+    if (root) await refreshTicketStore(root)
+  }, [ticketStoreRootHandle, refreshTicketStore])
 
   const addLog = useCallback((message: string) => {
     const at = formatTime()
@@ -441,6 +524,72 @@ function App() {
         </DndContext>
       </section>
 
+      <section className="tickets-docs-section" aria-label="Tickets (Docs)">
+        <h2>Tickets (Docs)</h2>
+        <p className="tickets-status" data-status={ticketStoreConnected ? 'connected' : 'disconnected'}>
+          {ticketStoreConnected ? 'Connected' : 'Disconnected'}
+        </p>
+        {!ticketStoreConnected ? (
+          <>
+            <p className="tickets-explanation">
+              Connect a project folder to read ticket files from <code>docs/tickets/*.md</code> (read-only).
+            </p>
+            <button type="button" className="connect-project-btn" onClick={handleConnectProject}>
+              Connect project
+            </button>
+            {ticketStoreConnectMessage && (
+              <p className="tickets-message" role="alert">
+                {ticketStoreConnectMessage}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            {ticketStoreLastError && (
+              <p className="tickets-message tickets-error" role="alert">
+                {ticketStoreLastError}
+              </p>
+            )}
+            <p className="tickets-count">Found {ticketStoreFiles.length} tickets.</p>
+            <button type="button" className="refresh-tickets-btn" onClick={handleRefreshTickets}>
+              Refresh
+            </button>
+            <div className="tickets-layout">
+              <ul className="tickets-list" aria-label="Ticket files">
+                {ticketStoreFiles.map((f) => (
+                  <li key={f.path}>
+                    <button
+                      type="button"
+                      className="ticket-file-btn"
+                      onClick={() => handleSelectTicket(f.path, f.name)}
+                      aria-pressed={selectedTicketPath === f.path}
+                    >
+                      {f.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="ticket-viewer" aria-label="Ticket viewer">
+                {selectedTicketPath ? (
+                  <>
+                    <p className="ticket-viewer-path">
+                      <strong>Path:</strong> {selectedTicketPath}
+                    </p>
+                    {ticketViewerLoading ? (
+                      <p className="ticket-viewer-loading">Loading…</p>
+                    ) : (
+                      <pre className="ticket-viewer-content">{selectedTicketContent ?? ''}</pre>
+                    )}
+                  </>
+                ) : (
+                  <p className="ticket-viewer-placeholder">Click a ticket file to view its contents.</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+
       <button type="button" className="debug-toggle" onClick={toggleDebug} aria-pressed={debugOpen}>
         Debug {debugOpen ? 'ON' : 'OFF'}
       </button>
@@ -463,6 +612,15 @@ function App() {
               <p className="kanban-cards-per-column">
                 Cards per column: {kanbanCardsDisplay}
               </p>
+            </div>
+          </section>
+          <section>
+            <h3>Ticket Store</h3>
+            <div className="build-info">
+              <p>Store: Docs (read-only)</p>
+              <p>Connected: {String(ticketStoreConnected)}</p>
+              <p>Last refresh: {ticketStoreLastRefresh ? ticketStoreLastRefresh.toISOString() : 'never'}</p>
+              <p>Last error: {ticketStoreLastError ?? 'none'}</p>
             </div>
           </section>
           <section>
