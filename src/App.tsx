@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -86,7 +86,15 @@ type ImportPreviewResult = {
   items: ImportPlanItem[]
 }
 
+/** Sync preview: docs→DB plan + DB→docs (rows to write to docs) */
+type SyncPreviewResult = {
+  docsToDb: ImportPreviewResult
+  dbToDocs: { id: string; filename: string }[]
+}
+
 const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
+/** Polling interval when Supabase board is active (0013); 10s */
+const SUPABASE_POLL_INTERVAL_MS = 10_000
 const SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   id text primary key,
   filename text not null,
@@ -197,15 +205,31 @@ function buildImportPlan(
   }
 }
 
+/** Build sync preview: docs→DB plan + DB rows to write to docs (id not in doc ids). */
+function buildSyncPreview(
+  scanResults: DocFileResult[],
+  existingRows: SupabaseTicketRow[]
+): SyncPreviewResult {
+  const docIds = new Set<string>()
+  for (const r of scanResults) {
+    if (r.ok) docIds.add(r.data.id)
+  }
+  const docsToDb = buildImportPlan(scanResults, existingRows)
+  const dbToDocs = existingRows.filter((r) => !docIds.has(r.id)).map((r) => ({ id: r.id, filename: r.filename }))
+  return { docsToDb, dbToDocs }
+}
+
 const DEFAULT_COLUMNS: Column[] = [
+  { id: 'col-unassigned', title: 'Unassigned', cardIds: [] },
   { id: 'col-todo', title: 'To-do', cardIds: ['c-1', 'c-2', 'c-3'] },
   { id: 'col-doing', title: 'Doing', cardIds: ['c-4', 'c-5', 'c-6'] },
   { id: 'col-done', title: 'Done', cardIds: ['c-7', 'c-8', 'c-9'] },
 ]
 
-/** Same three columns with empty cardIds; used when connected and filled from frontmatter */
-const KANBAN_COLUMN_IDS = ['col-todo', 'col-doing', 'col-done'] as const
+/** Unassigned + To-do/Doing/Done; tickets with null or col-unassigned go in Unassigned */
+const KANBAN_COLUMN_IDS = ['col-unassigned', 'col-todo', 'col-doing', 'col-done'] as const
 const EMPTY_KANBAN_COLUMNS: Column[] = [
+  { id: 'col-unassigned', title: 'Unassigned', cardIds: [] },
   { id: 'col-todo', title: 'To-do', cardIds: [] },
   { id: 'col-doing', title: 'Doing', cardIds: [] },
   { id: 'col-done', title: 'Done', cardIds: [] },
@@ -365,6 +389,41 @@ function DraggableTicketItem({
   )
 }
 
+/** Draggable Supabase ticket list item (0013): id is ticket id for DnD. */
+function DraggableSupabaseTicketItem({
+  row,
+  onClick,
+  isSelected,
+}: {
+  row: SupabaseTicketRow
+  onClick: () => void
+  isSelected: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: row.id,
+    data: { type: 'supabase-ticket-from-list', id: row.id },
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <li ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <button
+        type="button"
+        className="ticket-file-btn"
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+        aria-pressed={isSelected}
+      >
+        {row.title} ({row.id})
+      </button>
+    </li>
+  )
+}
+
 function App() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [actionLog, setActionLog] = useState<LogEntry[]>([])
@@ -406,12 +465,50 @@ function App() {
   const [supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
   const [selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
   const [selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
-  // Import from Docs (0012)
-  const [importPreview, setImportPreview] = useState<ImportPreviewResult | null>(null)
-  const [importInProgress, setImportInProgress] = useState(false)
-  const [importSummary, setImportSummary] = useState<string | null>(null)
-  const [importProgressText, setImportProgressText] = useState<string | null>(null)
-  const [supabaseLastImportError, setSupabaseLastImportError] = useState<string | null>(null)
+  // Sync with Docs (docs↔DB; replaces one-way Import)
+  const [syncPreview, setSyncPreview] = useState<SyncPreviewResult | null>(null)
+  const [syncInProgress, setSyncInProgress] = useState(false)
+  const [syncSummary, setSyncSummary] = useState<string | null>(null)
+  const [syncProgressText, setSyncProgressText] = useState<string | null>(null)
+  const [supabaseLastSyncError, setSupabaseLastSyncError] = useState<string | null>(null)
+
+  // Supabase board: when Supabase mode + connected, board is driven by supabaseTickets (0013)
+  const supabaseBoardActive =
+    ticketStoreMode === 'supabase' && supabaseConnectionStatus === 'connected'
+  const supabaseColumns = useMemo(() => {
+    if (!supabaseBoardActive) return EMPTY_KANBAN_COLUMNS
+    const byColumn: Record<string, { id: string; position: number }[]> = {
+      'col-unassigned': [],
+      'col-todo': [],
+      'col-doing': [],
+      'col-done': [],
+    }
+    for (const t of supabaseTickets) {
+      const colId = t.kanban_column_id == null || t.kanban_column_id === ''
+        ? 'col-unassigned'
+        : KANBAN_COLUMN_IDS.includes(t.kanban_column_id as (typeof KANBAN_COLUMN_IDS)[number])
+          ? t.kanban_column_id
+          : 'col-unassigned'
+      const pos = typeof t.kanban_position === 'number' ? t.kanban_position : 0
+      byColumn[colId].push({ id: t.id, position: pos })
+    }
+    for (const id of KANBAN_COLUMN_IDS) {
+      byColumn[id].sort((a, b) => a.position - b.position)
+    }
+    return [
+      { id: 'col-unassigned', title: 'Unassigned', cardIds: byColumn['col-unassigned'].map((x) => x.id) },
+      { id: 'col-todo', title: 'To-do', cardIds: byColumn['col-todo'].map((x) => x.id) },
+      { id: 'col-doing', title: 'Doing', cardIds: byColumn['col-doing'].map((x) => x.id) },
+      { id: 'col-done', title: 'Done', cardIds: byColumn['col-done'].map((x) => x.id) },
+    ]
+  }, [supabaseBoardActive, supabaseTickets])
+  const supabaseCards = useMemo(() => {
+    const map: Record<string, Card> = {}
+    for (const t of supabaseTickets) {
+      map[t.id] = { id: t.id, title: t.title }
+    }
+    return map
+  }, [supabaseTickets])
 
   // Load Supabase config from localStorage (not committed to git)
   useEffect(() => {
@@ -427,8 +524,16 @@ function App() {
     }
   }, [])
 
-  const columnsForDisplay = ticketStoreConnected ? ticketColumns : columns
-  const cardsForDisplay = ticketStoreConnected ? ticketCards : cards
+  const columnsForDisplay = supabaseBoardActive
+    ? supabaseColumns
+    : ticketStoreConnected
+      ? ticketColumns
+      : columns
+  const cardsForDisplay = supabaseBoardActive
+    ? supabaseCards
+    : ticketStoreConnected
+      ? ticketCards
+      : cards
 
   useEffect(() => {
     if (!lastSavedTicketPath) return
@@ -456,6 +561,7 @@ function App() {
 
       const ticketCardsMap: Record<string, Card> = {}
       const byColumn: Record<string, { path: string; position: number }[]> = {
+        'col-unassigned': [],
         'col-todo': [],
         'col-doing': [],
         'col-done': [],
@@ -468,12 +574,13 @@ function App() {
           const text = await file.text()
           const { frontmatter } = parseFrontmatter(text)
           const kanban = getKanbanFromFrontmatter(frontmatter)
-          if (kanban.kanbanColumnId && KANBAN_COLUMN_IDS.includes(kanban.kanbanColumnId as (typeof KANBAN_COLUMN_IDS)[number])) {
-            const pos = typeof kanban.kanbanPosition === 'number' ? kanban.kanbanPosition : 0
-            byColumn[kanban.kanbanColumnId].push({ path: f.path, position: pos })
-          }
+          const colId = kanban.kanbanColumnId && KANBAN_COLUMN_IDS.includes(kanban.kanbanColumnId as (typeof KANBAN_COLUMN_IDS)[number])
+            ? kanban.kanbanColumnId
+            : 'col-unassigned'
+          const pos = typeof kanban.kanbanPosition === 'number' ? kanban.kanbanPosition : 0
+          byColumn[colId].push({ path: f.path, position: pos })
         } catch {
-          // skip frontmatter for this file
+          byColumn['col-unassigned'].push({ path: f.path, position: 0 })
         }
       }
       for (const id of KANBAN_COLUMN_IDS) {
@@ -481,6 +588,7 @@ function App() {
       }
       setTicketCards(ticketCardsMap)
       setTicketColumns([
+        { id: 'col-unassigned', title: 'Unassigned', cardIds: byColumn['col-unassigned'].map((x) => x.path) },
         { id: 'col-todo', title: 'To-do', cardIds: byColumn['col-todo'].map((x) => x.path) },
         { id: 'col-doing', title: 'Doing', cardIds: byColumn['col-doing'].map((x) => x.path) },
         { id: 'col-done', title: 'Done', cardIds: byColumn['col-done'].map((x) => x.path) },
@@ -607,7 +715,7 @@ function App() {
     setSelectedSupabaseTicketContent(row.body_md ?? '')
   }, [])
 
-  /** Refetch tickets from Supabase (e.g. after import). Uses current url/key. */
+  /** Refetch tickets from Supabase (e.g. after import, after DnD). Uses current url/key. */
   const refetchSupabaseTickets = useCallback(async (): Promise<boolean> => {
     const url = supabaseProjectUrl.trim()
     const key = supabaseAnonKey.trim()
@@ -630,10 +738,42 @@ function App() {
     }
   }, [supabaseProjectUrl, supabaseAnonKey])
 
-  const handlePreviewImport = useCallback(async () => {
+  /** Update one ticket's kanban fields in Supabase (0013). Returns true on success. */
+  const updateSupabaseTicketKanban = useCallback(
+    async (
+      id: string,
+      updates: { kanban_column_id?: string; kanban_position?: number; kanban_moved_at?: string }
+    ): Promise<boolean> => {
+      const url = supabaseProjectUrl.trim()
+      const key = supabaseAnonKey.trim()
+      if (!url || !key) return false
+      try {
+        const client = createClient(url, key)
+        const { error } = await client.from('tickets').update(updates).eq('id', id)
+        if (error) {
+          setSupabaseLastError(error.message ?? String(error))
+          return false
+        }
+        return true
+      } catch (e) {
+        setSupabaseLastError(e instanceof Error ? e.message : String(e))
+        return false
+      }
+    },
+    [supabaseProjectUrl, supabaseAnonKey]
+  )
+
+  // Polling when Supabase board is active (0013)
+  useEffect(() => {
+    if (!supabaseBoardActive) return
+    const id = setInterval(refetchSupabaseTickets, SUPABASE_POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [supabaseBoardActive, refetchSupabaseTickets])
+
+  const handlePreviewSync = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (!root) return
-    setSupabaseLastImportError(null)
+    setSupabaseLastSyncError(null)
     const url = supabaseProjectUrl.trim()
     const key = supabaseAnonKey.trim()
     if (!url || !key) return
@@ -644,29 +784,46 @@ function App() {
         .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
         .order('id')
       if (error) {
-        setSupabaseLastImportError(error.message ?? String(error))
-        setImportPreview(null)
+        setSupabaseLastSyncError(error.message ?? String(error))
+        setSyncPreview(null)
         return
       }
       const existing = (rows ?? []) as SupabaseTicketRow[]
       const scanResults = await scanDocsTickets(root)
-      const plan = buildImportPlan(scanResults, existing)
-      setImportPreview(plan)
+      const preview = buildSyncPreview(scanResults, existing)
+      setSyncPreview(preview)
     } catch (e) {
-      setSupabaseLastImportError(e instanceof Error ? e.message : String(e))
-      setImportPreview(null)
+      setSupabaseLastSyncError(e instanceof Error ? e.message : String(e))
+      setSyncPreview(null)
     }
   }, [ticketStoreRootHandle, supabaseProjectUrl, supabaseAnonKey])
 
-  const handleRunImport = useCallback(async () => {
+  /** Write a new file to docs/tickets (Sync: DB→docs). */
+  const writeDocTicketFile = useCallback(
+    async (root: FileSystemDirectoryHandle, filename: string, content: string): Promise<void> => {
+      const docs = await root.getDirectoryHandle('docs')
+      const tickets = await docs.getDirectoryHandle('tickets')
+      const fileHandle = await tickets.getFileHandle(filename, { create: true })
+      if (fileHandle.requestPermission) {
+        const perm = await fileHandle.requestPermission({ mode: 'readwrite' })
+        if (perm !== 'granted') throw new Error('Write permission denied.')
+      }
+      const writable = await fileHandle.createWritable()
+      await writable.write(content)
+      await writable.close()
+    },
+    []
+  )
+
+  const handleRunSync = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (!root) return
-    setSupabaseLastImportError(null)
-    setImportSummary(null)
+    setSupabaseLastSyncError(null)
+    setSyncSummary(null)
     const url = supabaseProjectUrl.trim()
     const key = supabaseAnonKey.trim()
     if (!url || !key) return
-    setImportInProgress(true)
+    setSyncInProgress(true)
     try {
       const client = createClient(url, key)
       const { data: rows, error } = await client
@@ -674,24 +831,26 @@ function App() {
         .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
         .order('id')
       if (error) {
-        setSupabaseLastImportError(error.message ?? String(error))
-        setImportInProgress(false)
-        setImportProgressText(null)
+        setSupabaseLastSyncError(error.message ?? String(error))
+        setSyncInProgress(false)
+        setSyncProgressText(null)
         return
       }
       const existing = (rows ?? []) as SupabaseTicketRow[]
       const scanResults = await scanDocsTickets(root)
-      const plan = buildImportPlan(scanResults, existing)
-      const toWrite = plan.items.filter((i) => i.action === 'create' || i.action === 'update')
+      const { docsToDb, dbToDocs } = buildSyncPreview(scanResults, existing)
+      const toWrite = docsToDb.items.filter((i) => i.action === 'create' || i.action === 'update')
       const parsedByFilename = new Map<string, ParsedDocTicket>()
       for (const r of scanResults) {
         if (r.ok) parsedByFilename.set(r.data.filename, r.data)
       }
+      const existingById = new Map(existing.map((r) => [r.id, r]))
+
       let done = 0
       let created = 0
       let updated = 0
       for (const item of toWrite) {
-        setImportProgressText(`Importing ${done + 1}/${toWrite.length}…`)
+        setSyncProgressText(`Docs→DB ${done + 1}/${toWrite.length}…`)
         const data = parsedByFilename.get(item.filename)
         if (!data) continue
         const row = {
@@ -705,29 +864,75 @@ function App() {
         }
         const { error: upsertError } = await client.from('tickets').upsert(row, { onConflict: 'id' })
         if (upsertError) {
-          setSupabaseLastImportError(upsertError.message ?? String(upsertError))
-          setImportSummary(`Stopped after ${done} of ${toWrite.length}. Created ${created}, updated ${updated}.`)
-          setImportInProgress(false)
-          setImportProgressText(null)
+          setSupabaseLastSyncError(upsertError.message ?? String(upsertError))
+          setSyncSummary(`Stopped after ${done} of ${toWrite.length}. Created ${created}, updated ${updated}.`)
+          setSyncInProgress(false)
+          setSyncProgressText(null)
           return
         }
         if (item.action === 'create') created++
         else updated++
         done++
       }
-      setImportProgressText(null)
-      setImportSummary(
-        `Created ${created}, updated ${updated}, skipped ${plan.skip}${plan.fail > 0 ? `, failed ${plan.fail}` : ''}.`
+
+      let writtenToDocs = 0
+      for (let i = 0; i < dbToDocs.length; i++) {
+        setSyncProgressText(`DB→Docs ${i + 1}/${dbToDocs.length}…`)
+        const { id, filename } = dbToDocs[i]
+        const row = existingById.get(id)
+        if (!row) continue
+        try {
+          await writeDocTicketFile(root, filename, row.body_md ?? '')
+          writtenToDocs++
+        } catch (e) {
+          setSupabaseLastSyncError(e instanceof Error ? e.message : String(e))
+          setSyncSummary(`Docs→DB: ${created} created, ${updated} updated. DB→Docs: stopped at ${filename}.`)
+          setSyncInProgress(false)
+          setSyncProgressText(null)
+          await refetchSupabaseTickets()
+          return
+        }
+      }
+
+      const { data: afterRows } = await client
+        .from('tickets')
+        .select('id, kanban_column_id, kanban_position')
+        .order('id')
+      const afterRefetch = (afterRows ?? []) as SupabaseTicketRow[]
+      const unassigned = afterRefetch.filter(
+        (r) => r.kanban_column_id == null || r.kanban_column_id === '' || !KANBAN_COLUMN_IDS.includes(r.kanban_column_id as (typeof KANBAN_COLUMN_IDS)[number])
+      )
+      const movedAt = new Date().toISOString()
+      for (let i = 0; i < unassigned.length; i++) {
+        await client
+          .from('tickets')
+          .update({
+            kanban_column_id: 'col-unassigned',
+            kanban_position: i,
+            kanban_moved_at: movedAt,
+          })
+          .eq('id', unassigned[i].id)
+      }
+
+      setSyncProgressText(null)
+      setSyncSummary(
+        `Docs→DB: ${created} created, ${updated} updated, ${docsToDb.skip} skipped. DB→Docs: ${writtenToDocs} written. Unassigned: ${unassigned.length} in column.`
       )
       await refetchSupabaseTickets()
     } catch (e) {
-      setSupabaseLastImportError(e instanceof Error ? e.message : String(e))
-      setImportSummary(null)
+      setSupabaseLastSyncError(e instanceof Error ? e.message : String(e))
+      setSyncSummary(null)
     } finally {
-      setImportInProgress(false)
-      setImportProgressText(null)
+      setSyncInProgress(false)
+      setSyncProgressText(null)
     }
-  }, [ticketStoreRootHandle, supabaseProjectUrl, supabaseAnonKey, refetchSupabaseTickets])
+  }, [
+    ticketStoreRootHandle,
+    supabaseProjectUrl,
+    supabaseAnonKey,
+    refetchSupabaseTickets,
+    writeDocTicketFile,
+  ])
 
   const writeTicketKanbanFrontmatter = useCallback(
     async (
@@ -862,6 +1067,7 @@ function App() {
       if (effectiveOverId == null) return
 
       if (isColumnId(active.id)) {
+        if (supabaseBoardActive) return // fixed To-do/Doing/Done, no column reorder
         const cols = ticketStoreConnected ? ticketColumns : columns
         const setCols = ticketStoreConnected ? setTicketColumns : setColumns
         const oldIndex = cols.findIndex((c) => c.id === active.id)
@@ -906,7 +1112,73 @@ function App() {
         return
       }
 
+      // Supabase: drag from ticket list into column (0013)
+      if (
+        !sourceColumn &&
+        supabaseBoardActive &&
+        overColumn &&
+        supabaseTickets.some((t) => t.id === active.id)
+      ) {
+        const ticketId = String(active.id)
+        let overIndex = overColumn.cardIds.indexOf(String(effectiveOverId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
+        const ok = await updateSupabaseTicketKanban(ticketId, {
+          kanban_column_id: overColumn.id,
+          kanban_position: overIndex,
+          kanban_moved_at: new Date().toISOString(),
+        })
+        if (ok) {
+          await refetchSupabaseTickets()
+          addLog(`Supabase ticket ${ticketId} dropped into ${overColumn.title}`)
+        } else {
+          addLog(`Supabase update failed for ${ticketId}`)
+        }
+        return
+      }
+
       if (!sourceColumn || !overColumn) return
+
+      // Supabase: move or reorder within/between columns (0013)
+      if (supabaseBoardActive) {
+        const sourceCardIds = sourceColumn.cardIds
+        const activeIndex = sourceCardIds.indexOf(String(active.id))
+        const isSameColumn = sourceColumn.id === overColumn.id
+        let overIndex = overColumn.cardIds.indexOf(String(effectiveOverId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
+
+        if (isSameColumn) {
+          if (activeIndex === overIndex) return
+          const newOrder = arrayMove(sourceCardIds, activeIndex, overIndex)
+          const movedAt = new Date().toISOString()
+          for (let i = 0; i < newOrder.length; i++) {
+            const id = newOrder[i]
+            const ok = await updateSupabaseTicketKanban(id, {
+              kanban_position: i,
+              ...(id === active.id ? { kanban_moved_at: movedAt } : {}),
+            })
+            if (!ok) {
+              addLog(`Supabase reorder failed for ${id}`)
+              await refetchSupabaseTickets()
+              return
+            }
+          }
+          await refetchSupabaseTickets()
+          addLog(`Supabase ticket ${active.id} reordered in ${sourceColumn.title}`)
+        } else {
+          const ok = await updateSupabaseTicketKanban(String(active.id), {
+            kanban_column_id: overColumn.id,
+            kanban_position: overIndex,
+            kanban_moved_at: new Date().toISOString(),
+          })
+          if (ok) {
+            await refetchSupabaseTickets()
+            addLog(`Supabase ticket ${active.id} moved to ${overColumn.title}`)
+          } else {
+            addLog(`Supabase move failed for ${active.id}`)
+          }
+        }
+        return
+      }
 
       const sourceCardIds = sourceColumn.cardIds
       const activeIndex = sourceCardIds.indexOf(String(active.id))
@@ -986,6 +1258,10 @@ function App() {
       ticketStoreFiles,
       ticketColumns,
       columns,
+      supabaseBoardActive,
+      supabaseTickets,
+      updateSupabaseTicketKanban,
+      refetchSupabaseTickets,
       findColumnByCardId,
       findColumnById,
       isColumnId,
@@ -1010,6 +1286,12 @@ function App() {
           .map((c) => `${c.title}: ${c.cardIds.map((id) => cardsForDisplay[id]?.title ?? id).join(',')}`)
           .join(' | ')
 
+  /** Per-column ticket IDs for Debug (0013); human-verifiable without external tools */
+  const kanbanColumnTicketIdsDisplay =
+    columnsForDisplay.length === 0
+      ? '(none)'
+      : columnsForDisplay.map((c) => `${c.title}: ${c.cardIds.length ? c.cardIds.join(',') : '(empty)'}`).join(' | ')
+
   return (
     <>
       <h1>Portfolio 2026</h1>
@@ -1024,7 +1306,7 @@ function App() {
       >
         <section className="columns-section" aria-label="Columns">
           <h2>Columns</h2>
-          {!ticketStoreConnected && (
+          {!ticketStoreConnected && !supabaseBoardActive && (
             <>
               <button
                 type="button"
@@ -1080,7 +1362,7 @@ function App() {
                   col={col}
                   cards={cardsForDisplay}
                   onRemove={handleRemoveColumn}
-                  hideRemove={ticketStoreConnected}
+                  hideRemove={ticketStoreConnected || supabaseBoardActive}
                 />
               ))}
             </div>
@@ -1242,8 +1524,11 @@ function App() {
               </div>
             )}
 
-            <div className="import-from-docs" role="region" aria-label="Import from Docs">
-              <h4>Import from Docs</h4>
+            <div className="import-from-docs" role="region" aria-label="Sync with Docs">
+              <h4>Sync with Docs</h4>
+              <p className="tickets-explanation">
+                Syncs both ways: docs tickets → DB (create/update), DB tickets not in docs → new files. After sync, tickets not on the board go into Unassigned.
+              </p>
               {supabaseConnectionStatus !== 'connected' ? (
                 <p className="tickets-message" role="alert">
                   Connect Supabase first (Project URL + Anon key, then Connect).
@@ -1258,44 +1543,48 @@ function App() {
                     <button
                       type="button"
                       className="connect-project-btn"
-                      onClick={handlePreviewImport}
-                      disabled={importInProgress}
+                      onClick={handlePreviewSync}
+                      disabled={syncInProgress}
                     >
-                      Preview import
+                      Preview sync
                     </button>
                     <button
                       type="button"
                       className="connect-project-btn"
-                      onClick={handleRunImport}
-                      disabled={importInProgress}
+                      onClick={handleRunSync}
+                      disabled={syncInProgress}
                     >
-                      Import
+                      Sync
                     </button>
                   </div>
-                  {importProgressText && (
+                  {syncProgressText && (
                     <p className="tickets-message" role="status">
-                      {importProgressText}
+                      {syncProgressText}
                     </p>
                   )}
-                  {importSummary && (
+                  {syncSummary && (
                     <p className="tickets-message import-summary" role="status">
-                      {importSummary}
+                      {syncSummary}
                     </p>
                   )}
-                  {supabaseLastImportError && (
+                  {supabaseLastSyncError && (
                     <p className="tickets-message tickets-error" role="alert">
-                      Import error: {supabaseLastImportError}
+                      Sync error: {supabaseLastSyncError}
                     </p>
                   )}
-                  {importPreview && (
+                  {syncPreview && (
                     <div className="import-preview">
                       <p className="import-totals">
-                        Found {importPreview.found} · Will create {importPreview.create} · Will update{' '}
-                        {importPreview.update} · Will skip {importPreview.skip}
-                        {importPreview.fail > 0 ? ` · Will fail ${importPreview.fail}` : ''}
+                        Docs→DB: found {syncPreview.docsToDb.found} · create {syncPreview.docsToDb.create} · update{' '}
+                        {syncPreview.docsToDb.update} · skip {syncPreview.docsToDb.skip}
+                        {syncPreview.docsToDb.fail > 0 ? ` · fail ${syncPreview.docsToDb.fail}` : ''}
                       </p>
-                      <ul className="import-preview-list" aria-label="Import plan">
-                        {importPreview.items.map((item, idx) => (
+                      <p className="import-totals">
+                        DB→Docs: will write {syncPreview.dbToDocs.length} file(s){' '}
+                        {syncPreview.dbToDocs.length > 0 ? `(${syncPreview.dbToDocs.map((x) => x.filename).join(', ')})` : ''}
+                      </p>
+                      <ul className="import-preview-list" aria-label="Docs→DB plan">
+                        {syncPreview.docsToDb.items.map((item, idx) => (
                           <li key={idx} className="import-preview-item" data-action={item.action}>
                             <span className="import-filename">{item.filename}</span>
                             <span className="import-action">{item.action}</span>
@@ -1311,20 +1600,18 @@ function App() {
 
             {supabaseConnectionStatus === 'connected' && (
               <>
-                <p className="tickets-count">Found {supabaseTickets.length} tickets.</p>
+                <p className="tickets-count">
+                  Found {supabaseTickets.length} tickets. Drag into a column to save.
+                </p>
                 <div className="tickets-layout">
                   <ul className="tickets-list" aria-label="Supabase tickets">
                     {supabaseTickets.map((row) => (
-                      <li key={row.id}>
-                        <button
-                          type="button"
-                          className="ticket-file-btn"
-                          onClick={() => handleSelectSupabaseTicket(row)}
-                          aria-pressed={selectedSupabaseTicketId === row.id}
-                        >
-                          {row.title} ({row.id})
-                        </button>
-                      </li>
+                      <DraggableSupabaseTicketItem
+                        key={row.id}
+                        row={row}
+                        onClick={() => handleSelectSupabaseTicket(row)}
+                        isSelected={selectedSupabaseTicketId === row.id}
+                      />
                     ))}
                   </ul>
                   <div className="ticket-viewer" aria-label="Ticket viewer">
@@ -1395,9 +1682,11 @@ function App() {
             <div className="build-info">
               <p>Connected: {String(supabaseConnectionStatus === 'connected')}</p>
               <p>Project URL present: {String(!!supabaseProjectUrl.trim())}</p>
-              <p>Last refresh time: {supabaseLastRefresh ? supabaseLastRefresh.toISOString() : 'never'}</p>
-              <p>Last error: {supabaseLastError ?? 'none'}</p>
-              <p>Last import error: {supabaseLastImportError ?? 'none'}</p>
+              <p>Polling: {supabaseBoardActive ? `${SUPABASE_POLL_INTERVAL_MS / 1000}s` : 'off'}</p>
+              <p>Last poll time: {supabaseLastRefresh ? supabaseLastRefresh.toISOString() : 'never'}</p>
+              <p>Last poll error: {supabaseLastError ?? 'none'}</p>
+              <p>Last sync error: {supabaseLastSyncError ?? 'none'}</p>
+              <p className="kanban-column-ticket-ids">Per-column ticket IDs: {kanbanColumnTicketIdsDisplay}</p>
             </div>
           </section>
           {selectedTicketPath && (
