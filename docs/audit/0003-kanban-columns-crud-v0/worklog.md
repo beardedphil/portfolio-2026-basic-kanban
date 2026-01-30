@@ -24,4 +24,4 @@
 - Created `docs/audit/0003-kanban-columns-crud-v0/` with plan, worklog, changed-files, decisions, verification.
 
 ## Commit and push
-- (To be filled after commit and push: commit hash _____________)
+- Pushed commit: `9b56533`
