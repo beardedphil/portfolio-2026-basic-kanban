@@ -12,11 +12,13 @@ alwaysApply: true
 - Agents must not delegate commit/push work to the user/PM (e.g., “after you commit and push…”).
   - If commit/push hasn’t happened yet, the correct status is **“not ready for verification.”**
 - “Done/ready” messages must include the exact `git status -sb` output showing the branch is synced and the working tree is clean.
+  - “Clean” means: **no modified files** and **no untracked files** (ignored build artifacts are fine).
 
 ## Commit message linkage (no commit hashes in docs)
 
 - Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. `feat(0010): ...`, `fix(0008): ...`, `docs(0009): ...`).
 - If `git status -sb` is not clean/synced, the agent must say **“not ready for verification”** and keep working until it is.
+  - Do not claim “ready” if `git status` shows any `??` (untracked) or `M` (modified) entries.
 
 ## PM verification
 
