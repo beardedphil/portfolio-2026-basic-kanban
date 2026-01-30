@@ -52,6 +52,40 @@ type SupabaseTicketRow = {
   updated_at: string
 }
 
+/** Parsed ticket from docs/tickets/*.md for import */
+type ParsedDocTicket = {
+  id: string
+  filename: string
+  title: string
+  body_md: string
+  kanban_column_id: string | null
+  kanban_position: number | null
+  kanban_moved_at: string | null
+}
+
+/** Single file result from scan: either parsed or fail */
+type DocFileResult =
+  | { ok: true; data: ParsedDocTicket }
+  | { ok: false; filename: string; reason: string }
+
+/** Planned action for one file in import */
+type ImportPlanItem = {
+  filename: string
+  id: string
+  action: 'create' | 'update' | 'skip' | 'fail'
+  reason?: string
+}
+
+/** Preview result: totals + per-file list */
+type ImportPreviewResult = {
+  found: number
+  create: number
+  update: number
+  skip: number
+  fail: number
+  items: ImportPlanItem[]
+}
+
 const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
 const SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   id text primary key,
@@ -63,6 +97,105 @@ const SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   kanban_moved_at timestamptz null,
   updated_at timestamptz not null default now()
 );`
+
+/** First 4 digits from filename (e.g. 0009-...md → 0009). Invalid → null. */
+function extractTicketId(filename: string): string | null {
+  const match = filename.match(/^(\d{4})/)
+  return match ? match[1] : null
+}
+
+/** Best-effort title: "- **Title**: ..." in content, else filename without .md */
+function extractTitleFromContent(content: string, filename: string): string {
+  const m = content.match(/\*\*Title\*\*:\s*(.+?)(?:\n|$)/)
+  if (m) return m[1].trim()
+  return filename.replace(/\.md$/i, '')
+}
+
+/** Scan docs/tickets from project root; return parsed or fail per file. */
+async function scanDocsTickets(root: FileSystemDirectoryHandle): Promise<DocFileResult[]> {
+  const results: DocFileResult[] = []
+  const docs = await root.getDirectoryHandle('docs')
+  const tickets = await docs.getDirectoryHandle('tickets')
+  const files: { name: string }[] = []
+  for await (const [name, entry] of tickets.entries()) {
+    if (entry.kind === 'file' && name.endsWith('.md')) files.push({ name })
+  }
+  files.sort((a, b) => a.name.localeCompare(b.name))
+  for (const { name } of files) {
+    const id = extractTicketId(name)
+    if (!id) {
+      results.push({ ok: false, filename: name, reason: 'Filename must start with 4 digits (e.g. 0009-...)' })
+      continue
+    }
+    try {
+      const fileHandle = await tickets.getFileHandle(name)
+      const file = await fileHandle.getFile()
+      const body_md = await file.text()
+      const title = extractTitleFromContent(body_md, name)
+      const { frontmatter } = parseFrontmatter(body_md)
+      const kanban = getKanbanFromFrontmatter(frontmatter)
+      results.push({
+        ok: true,
+        data: {
+          id,
+          filename: name,
+          title,
+          body_md,
+          kanban_column_id: kanban.kanbanColumnId ?? null,
+          kanban_position: kanban.kanbanPosition ?? null,
+          kanban_moved_at: kanban.kanbanMovedAt ?? null,
+        },
+      })
+    } catch (e) {
+      results.push({
+        ok: false,
+        filename: name,
+        reason: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+  return results
+}
+
+/** Build import plan from scan results and existing Supabase rows. */
+function buildImportPlan(
+  scanResults: DocFileResult[],
+  existingRows: SupabaseTicketRow[]
+): ImportPreviewResult {
+  const byId = new Map(existingRows.map((r) => [r.id, r]))
+  const items: ImportPlanItem[] = []
+  let create = 0,
+    update = 0,
+    skip = 0,
+    fail = 0
+  for (const r of scanResults) {
+    if (!r.ok) {
+      items.push({ filename: r.filename, id: '', action: 'fail', reason: r.reason })
+      fail++
+      continue
+    }
+    const d = r.data
+    const existing = byId.get(d.id)
+    if (!existing) {
+      items.push({ filename: d.filename, id: d.id, action: 'create' })
+      create++
+    } else if (existing.body_md !== d.body_md) {
+      items.push({ filename: d.filename, id: d.id, action: 'update' })
+      update++
+    } else {
+      items.push({ filename: d.filename, id: d.id, action: 'skip', reason: 'Unchanged' })
+      skip++
+    }
+  }
+  return {
+    found: scanResults.length,
+    create,
+    update,
+    skip,
+    fail,
+    items,
+  }
+}
 
 const DEFAULT_COLUMNS: Column[] = [
   { id: 'col-todo', title: 'To-do', cardIds: ['c-1', 'c-2', 'c-3'] },
@@ -273,6 +406,12 @@ function App() {
   const [supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
   const [selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
   const [selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
+  // Import from Docs (0012)
+  const [importPreview, setImportPreview] = useState<ImportPreviewResult | null>(null)
+  const [importInProgress, setImportInProgress] = useState(false)
+  const [importSummary, setImportSummary] = useState<string | null>(null)
+  const [importProgressText, setImportProgressText] = useState<string | null>(null)
+  const [supabaseLastImportError, setSupabaseLastImportError] = useState<string | null>(null)
 
   // Load Supabase config from localStorage (not committed to git)
   useEffect(() => {
@@ -467,6 +606,128 @@ function App() {
     setSelectedSupabaseTicketId(row.id)
     setSelectedSupabaseTicketContent(row.body_md ?? '')
   }, [])
+
+  /** Refetch tickets from Supabase (e.g. after import). Uses current url/key. */
+  const refetchSupabaseTickets = useCallback(async (): Promise<boolean> => {
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    if (!url || !key) return false
+    try {
+      const client = createClient(url, key)
+      const { data: rows, error } = await client
+        .from('tickets')
+        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+        .order('id')
+      if (error) {
+        setSupabaseLastError(error.message ?? String(error))
+        return false
+      }
+      setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
+      setSupabaseLastRefresh(new Date())
+      return true
+    } catch {
+      return false
+    }
+  }, [supabaseProjectUrl, supabaseAnonKey])
+
+  const handlePreviewImport = useCallback(async () => {
+    const root = ticketStoreRootHandle
+    if (!root) return
+    setSupabaseLastImportError(null)
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    if (!url || !key) return
+    try {
+      const client = createClient(url, key)
+      const { data: rows, error } = await client
+        .from('tickets')
+        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+        .order('id')
+      if (error) {
+        setSupabaseLastImportError(error.message ?? String(error))
+        setImportPreview(null)
+        return
+      }
+      const existing = (rows ?? []) as SupabaseTicketRow[]
+      const scanResults = await scanDocsTickets(root)
+      const plan = buildImportPlan(scanResults, existing)
+      setImportPreview(plan)
+    } catch (e) {
+      setSupabaseLastImportError(e instanceof Error ? e.message : String(e))
+      setImportPreview(null)
+    }
+  }, [ticketStoreRootHandle, supabaseProjectUrl, supabaseAnonKey])
+
+  const handleRunImport = useCallback(async () => {
+    const root = ticketStoreRootHandle
+    if (!root) return
+    setSupabaseLastImportError(null)
+    setImportSummary(null)
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    if (!url || !key) return
+    setImportInProgress(true)
+    try {
+      const client = createClient(url, key)
+      const { data: rows, error } = await client
+        .from('tickets')
+        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+        .order('id')
+      if (error) {
+        setSupabaseLastImportError(error.message ?? String(error))
+        setImportInProgress(false)
+        setImportProgressText(null)
+        return
+      }
+      const existing = (rows ?? []) as SupabaseTicketRow[]
+      const scanResults = await scanDocsTickets(root)
+      const plan = buildImportPlan(scanResults, existing)
+      const toWrite = plan.items.filter((i) => i.action === 'create' || i.action === 'update')
+      const parsedByFilename = new Map<string, ParsedDocTicket>()
+      for (const r of scanResults) {
+        if (r.ok) parsedByFilename.set(r.data.filename, r.data)
+      }
+      let done = 0
+      let created = 0
+      let updated = 0
+      for (const item of toWrite) {
+        setImportProgressText(`Importing ${done + 1}/${toWrite.length}…`)
+        const data = parsedByFilename.get(item.filename)
+        if (!data) continue
+        const row = {
+          id: data.id,
+          filename: data.filename,
+          title: data.title,
+          body_md: data.body_md,
+          kanban_column_id: data.kanban_column_id,
+          kanban_position: data.kanban_position,
+          kanban_moved_at: data.kanban_moved_at,
+        }
+        const { error: upsertError } = await client.from('tickets').upsert(row, { onConflict: 'id' })
+        if (upsertError) {
+          setSupabaseLastImportError(upsertError.message ?? String(upsertError))
+          setImportSummary(`Stopped after ${done} of ${toWrite.length}. Created ${created}, updated ${updated}.`)
+          setImportInProgress(false)
+          setImportProgressText(null)
+          return
+        }
+        if (item.action === 'create') created++
+        else updated++
+        done++
+      }
+      setImportProgressText(null)
+      setImportSummary(
+        `Created ${created}, updated ${updated}, skipped ${plan.skip}${plan.fail > 0 ? `, failed ${plan.fail}` : ''}.`
+      )
+      await refetchSupabaseTickets()
+    } catch (e) {
+      setSupabaseLastImportError(e instanceof Error ? e.message : String(e))
+      setImportSummary(null)
+    } finally {
+      setImportInProgress(false)
+      setImportProgressText(null)
+    }
+  }, [ticketStoreRootHandle, supabaseProjectUrl, supabaseAnonKey, refetchSupabaseTickets])
 
   const writeTicketKanbanFrontmatter = useCallback(
     async (
@@ -981,6 +1242,73 @@ function App() {
               </div>
             )}
 
+            <div className="import-from-docs" role="region" aria-label="Import from Docs">
+              <h4>Import from Docs</h4>
+              {supabaseConnectionStatus !== 'connected' ? (
+                <p className="tickets-message" role="alert">
+                  Connect Supabase first (Project URL + Anon key, then Connect).
+                </p>
+              ) : !ticketStoreConnected ? (
+                <p className="tickets-message" role="alert">
+                  Connect project folder first (switch to Docs tab and use Connect project folder).
+                </p>
+              ) : (
+                <>
+                  <div className="import-actions">
+                    <button
+                      type="button"
+                      className="connect-project-btn"
+                      onClick={handlePreviewImport}
+                      disabled={importInProgress}
+                    >
+                      Preview import
+                    </button>
+                    <button
+                      type="button"
+                      className="connect-project-btn"
+                      onClick={handleRunImport}
+                      disabled={importInProgress}
+                    >
+                      Import
+                    </button>
+                  </div>
+                  {importProgressText && (
+                    <p className="tickets-message" role="status">
+                      {importProgressText}
+                    </p>
+                  )}
+                  {importSummary && (
+                    <p className="tickets-message import-summary" role="status">
+                      {importSummary}
+                    </p>
+                  )}
+                  {supabaseLastImportError && (
+                    <p className="tickets-message tickets-error" role="alert">
+                      Import error: {supabaseLastImportError}
+                    </p>
+                  )}
+                  {importPreview && (
+                    <div className="import-preview">
+                      <p className="import-totals">
+                        Found {importPreview.found} · Will create {importPreview.create} · Will update{' '}
+                        {importPreview.update} · Will skip {importPreview.skip}
+                        {importPreview.fail > 0 ? ` · Will fail ${importPreview.fail}` : ''}
+                      </p>
+                      <ul className="import-preview-list" aria-label="Import plan">
+                        {importPreview.items.map((item, idx) => (
+                          <li key={idx} className="import-preview-item" data-action={item.action}>
+                            <span className="import-filename">{item.filename}</span>
+                            <span className="import-action">{item.action}</span>
+                            {item.reason != null && <span className="import-reason">{item.reason}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
             {supabaseConnectionStatus === 'connected' && (
               <>
                 <p className="tickets-count">Found {supabaseTickets.length} tickets.</p>
@@ -1069,6 +1397,7 @@ function App() {
               <p>Project URL present: {String(!!supabaseProjectUrl.trim())}</p>
               <p>Last refresh time: {supabaseLastRefresh ? supabaseLastRefresh.toISOString() : 'never'}</p>
               <p>Last error: {supabaseLastError ?? 'none'}</p>
+              <p>Last import error: {supabaseLastImportError ?? 'none'}</p>
             </div>
           </section>
           {selectedTicketPath && (
