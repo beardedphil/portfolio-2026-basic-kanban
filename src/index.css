@@ -144,8 +144,10 @@ h1 {
 }
 .columns-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 0.75rem;
+  overflow-x: auto;
 }
 .column-card {
   min-width: 180px;
