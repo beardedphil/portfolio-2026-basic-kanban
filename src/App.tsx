@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
   pointerWithin,
   rectIntersection,
@@ -12,6 +13,7 @@ import {
   useDroppable,
   type CollisionDetection,
   type DragEndEvent,
+  type DragStartEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core'
 import {
@@ -157,6 +159,7 @@ function App() {
   const [showAddColumnForm, setShowAddColumnForm] = useState(false)
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [addColumnError, setAddColumnError] = useState<string | null>(null)
+  const [activeCardId, setActiveCardId] = useState<UniqueIdentifier | null>(null)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
 
   const addLog = useCallback((message: string) => {
@@ -246,6 +249,13 @@ function App() {
     [columns, addLog]
   )
 
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      if (!isColumnId(event.active.id)) setActiveCardId(event.active.id)
+    },
+    [isColumnId]
+  )
+
   const handleDragOver = useCallback(() => {
     // State is updated only on drop (handleDragEnd) so that cross-column moves
     // see the correct source column and persist.
@@ -253,12 +263,15 @@ function App() {
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      setActiveCardId(null)
       const { active, over } = event
-      if (!over?.id) return
+      // Use last known over from collision detection when over is null on drop
+      const effectiveOverId = over?.id ?? lastOverId.current
+      if (effectiveOverId == null) return
 
       if (isColumnId(active.id)) {
         const oldIndex = columns.findIndex((c) => c.id === active.id)
-        const newIndex = columns.findIndex((c) => c.id === over.id)
+        const newIndex = columns.findIndex((c) => c.id === effectiveOverId)
         if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
         const next = arrayMove(columns, oldIndex, newIndex)
         setColumns(next)
@@ -271,8 +284,9 @@ function App() {
       const sourceColumn = findColumnByCardId(String(active.id))
       if (!sourceColumn) return
 
-      const overId = over.id
-      const overColumn = findColumnById(String(overId))
+      const overId = effectiveOverId
+      // overId can be column id (droppable) or card id (dropped on a card)
+      const overColumn = findColumnById(String(overId)) ?? findColumnByCardId(String(overId))
       if (!overColumn) return
 
       const sourceCardIds = sourceColumn.cardIds
@@ -398,6 +412,7 @@ function App() {
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetection}
+          onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
@@ -416,6 +431,13 @@ function App() {
               ))}
             </div>
           </SortableContext>
+          <DragOverlay>
+            {activeCardId && cards[String(activeCardId)] ? (
+              <div className="ticket-card" data-card-id={activeCardId}>
+                {cards[String(activeCardId)].title}
+              </div>
+            ) : null}
+          </DragOverlay>
         </DndContext>
       </section>
 

@@ -23,5 +23,5 @@
 - Build passes. Manual verification: reorder within column persists; drag from To-do to Doing and Doing to Done moves cards and they stay; Debug Kanban state and Action log update after each drop.
 
 ## Commit and push
-- After committing: add commit hash(es) here and run `git status -sb` and paste output below.
-- Example when ready: `git status -sb` → `## main...origin/main` (clean).
+- Commit: `99c2b80` (fix(0008): persist card reorder and cross-column move; update state only on drop).
+- `git status -sb` (when ready): `## main...origin/main [ahead 1]` with optional ` M docs/audit/0007-dnd-dummy-cards-and-default-columns/worklog.md` and `?? nul`.
