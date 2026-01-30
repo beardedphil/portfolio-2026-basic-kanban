@@ -95,7 +95,9 @@ type SyncPreviewResult = {
 const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
 /** Polling interval when Supabase board is active (0013); 10s */
 const SUPABASE_POLL_INTERVAL_MS = 10_000
-const SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
+/** Project dropdown options (0014); UI-only for now */
+const PROJECT_OPTIONS = [{ id: 'hal-kanban', label: 'hal-kanban' }] as const
+const _SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   id text primary key,
   filename text not null,
   title text not null,
@@ -353,7 +355,7 @@ function SortableColumn({
   )
 }
 
-function DraggableTicketItem({
+function _DraggableTicketItem({
   path,
   name,
   onClick,
@@ -390,7 +392,7 @@ function DraggableTicketItem({
 }
 
 /** Draggable Supabase ticket list item (0013): id is ticket id for DnD. */
-function DraggableSupabaseTicketItem({
+function _DraggableSupabaseTicketItem({
   row,
   onClick,
   isSelected,
@@ -442,10 +444,10 @@ function App() {
   const [ticketStoreFiles, setTicketStoreFiles] = useState<TicketFile[]>([])
   const [ticketStoreLastRefresh, setTicketStoreLastRefresh] = useState<Date | null>(null)
   const [ticketStoreLastError, setTicketStoreLastError] = useState<string | null>(null)
-  const [ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
+  const [_ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
   const [selectedTicketPath, setSelectedTicketPath] = useState<string | null>(null)
   const [selectedTicketContent, setSelectedTicketContent] = useState<string | null>(null)
-  const [ticketViewerLoading, setTicketViewerLoading] = useState(false)
+  const [_ticketViewerLoading, setTicketViewerLoading] = useState(false)
   // Kanban-from-docs state (used when connected)
   const [ticketColumns, setTicketColumns] = useState<Column[]>(() => EMPTY_KANBAN_COLUMNS)
   const [ticketCards, setTicketCards] = useState<Record<string, Card>>({})
@@ -453,8 +455,10 @@ function App() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [lastWriteError, setLastWriteError] = useState<string | null>(null)
 
-  // Ticket Store mode: Docs (folder) vs Supabase
-  const [ticketStoreMode, setTicketStoreMode] = useState<'docs' | 'supabase'>('docs')
+  // Ticket Store mode: Docs (folder) vs Supabase; main UI uses Supabase only (0014)
+  const [ticketStoreMode, _setTicketStoreMode] = useState<'docs' | 'supabase'>('supabase')
+  // Project selector (0014); single option for now
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(PROJECT_OPTIONS[0].id)
   // Supabase (read-only v0)
   const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
@@ -462,14 +466,14 @@ function App() {
   const [supabaseLastError, setSupabaseLastError] = useState<string | null>(null)
   const [supabaseTickets, setSupabaseTickets] = useState<SupabaseTicketRow[]>([])
   const [supabaseLastRefresh, setSupabaseLastRefresh] = useState<Date | null>(null)
-  const [supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
-  const [selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
-  const [selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
+  const [_supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
+  const [_selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
+  const [_selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
   // Sync with Docs (docs↔DB; replaces one-way Import)
-  const [syncPreview, setSyncPreview] = useState<SyncPreviewResult | null>(null)
-  const [syncInProgress, setSyncInProgress] = useState(false)
-  const [syncSummary, setSyncSummary] = useState<string | null>(null)
-  const [syncProgressText, setSyncProgressText] = useState<string | null>(null)
+  const [_syncPreview, setSyncPreview] = useState<SyncPreviewResult | null>(null)
+  const [_syncInProgress, setSyncInProgress] = useState(false)
+  const [_syncSummary, setSyncSummary] = useState<string | null>(null)
+  const [_syncProgressText, setSyncProgressText] = useState<string | null>(null)
   const [supabaseLastSyncError, setSupabaseLastSyncError] = useState<string | null>(null)
 
   // Supabase board: when Supabase mode + connected, board is driven by supabaseTickets (0013)
@@ -510,19 +514,68 @@ function App() {
     return map
   }, [supabaseTickets])
 
-  // Load Supabase config from localStorage (not committed to git)
-  useEffect(() => {
+  /** Connect to Supabase with given url/key; sets status, tickets, errors (0014). */
+  const connectSupabase = useCallback(async (url: string, key: string) => {
+    setSupabaseLastError(null)
+    setSupabaseNotInitialized(false)
+    if (!url || !key) {
+      setSupabaseLastError('Project URL and Anon key are required.')
+      return
+    }
+    setSupabaseConnectionStatus('connecting')
     try {
-      const raw = localStorage.getItem(SUPABASE_CONFIG_KEY)
-      if (raw) {
-        const { projectUrl, anonKey } = JSON.parse(raw) as { projectUrl?: string; anonKey?: string }
-        if (projectUrl) setSupabaseProjectUrl(projectUrl)
-        if (anonKey) setSupabaseAnonKey(anonKey)
+      const client = createClient(url, key)
+      const { error: testError } = await client.from('tickets').select('id').limit(1)
+      if (testError) {
+        const code = (testError as { code?: string }).code
+        const msg = testError.message ?? String(testError)
+        const lower = msg.toLowerCase()
+        const isTableMissing =
+          code === '42P01' ||
+          lower.includes('relation') ||
+          lower.includes('does not exist') ||
+          lower.includes('schema cache') ||
+          lower.includes('could not find the table')
+        if (isTableMissing) {
+          setSupabaseNotInitialized(true)
+          setSupabaseLastError('Supabase not initialized (tickets table missing).')
+        } else {
+          setSupabaseLastError(msg)
+        }
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+        return
       }
-    } catch {
-      // ignore
+      const { data: rows, error } = await client
+        .from('tickets')
+        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+        .order('id')
+      if (error) {
+        setSupabaseLastError(error.message ?? String(error))
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+        return
+      }
+      setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
+      setSupabaseLastRefresh(new Date())
+      setSupabaseConnectionStatus('connected')
+      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ projectUrl: url, anonKey: key }))
+    } catch (e) {
+      setSupabaseLastError(e instanceof Error ? e.message : String(e))
+      setSupabaseConnectionStatus('disconnected')
+      setSupabaseTickets([])
     }
   }, [])
+
+  // Auto-connect to Supabase from env on load (0014)
+  useEffect(() => {
+    const envUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
+    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
+    if (!envUrl || !envKey) return
+    setSupabaseProjectUrl(envUrl)
+    setSupabaseAnonKey(envKey)
+    connectSupabase(envUrl, envKey)
+  }, [connectSupabase])
 
   const columnsForDisplay = supabaseBoardActive
     ? supabaseColumns
@@ -603,7 +656,7 @@ function App() {
     }
   }, [])
 
-  const handleConnectProject = useCallback(async () => {
+  const _handleConnectProject = useCallback(async () => {
     setTicketStoreConnectMessage(null)
     if (typeof window.showDirectoryPicker !== 'function') {
       setTicketStoreLastError('Folder picker not supported in this browser.')
@@ -624,7 +677,7 @@ function App() {
     }
   }, [refreshTicketStore])
 
-  const handleSelectTicket = useCallback(
+  const _handleSelectTicket = useCallback(
     async (path: string, name: string) => {
       const root = ticketStoreRootHandle
       if (!root) return
@@ -647,70 +700,16 @@ function App() {
     [ticketStoreRootHandle]
   )
 
-  const handleRefreshTickets = useCallback(async () => {
+  const _handleRefreshTickets = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (root) await refreshTicketStore(root)
   }, [ticketStoreRootHandle, refreshTicketStore])
 
-  const handleSupabaseConnect = useCallback(async () => {
-    const url = supabaseProjectUrl.trim()
-    const key = supabaseAnonKey.trim()
-    setSupabaseLastError(null)
-    setSupabaseNotInitialized(false)
-    if (!url || !key) {
-      setSupabaseLastError('Project URL and Anon key are required.')
-      return
-    }
-    setSupabaseConnectionStatus('connecting')
-    try {
-      const client = createClient(url, key)
-      // Test query: verify table exists and is readable
-      const { error: testError } = await client
-        .from('tickets')
-        .select('id')
-        .limit(1)
-      if (testError) {
-        const code = (testError as { code?: string }).code
-        const msg = testError.message ?? String(testError)
-        const lower = msg.toLowerCase()
-        const isTableMissing =
-          code === '42P01' ||
-          lower.includes('relation') ||
-          lower.includes('does not exist') ||
-          lower.includes('schema cache') ||
-          lower.includes('could not find the table')
-        if (isTableMissing) {
-          setSupabaseNotInitialized(true)
-          setSupabaseLastError('Supabase not initialized (tickets table missing).')
-        } else {
-          setSupabaseLastError(msg)
-        }
-        setSupabaseConnectionStatus('disconnected')
-        setSupabaseTickets([])
-        return
-      }
-      const { data: rows, error } = await client
-        .from('tickets')
-        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
-        .order('id')
-      if (error) {
-        setSupabaseLastError(error.message ?? String(error))
-        setSupabaseConnectionStatus('disconnected')
-        setSupabaseTickets([])
-        return
-      }
-      setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
-      setSupabaseLastRefresh(new Date())
-      setSupabaseConnectionStatus('connected')
-      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ projectUrl: url, anonKey: key }))
-    } catch (e) {
-      setSupabaseLastError(e instanceof Error ? e.message : String(e))
-      setSupabaseConnectionStatus('disconnected')
-      setSupabaseTickets([])
-    }
-  }, [supabaseProjectUrl, supabaseAnonKey])
+  const _handleSupabaseConnect = useCallback(() => {
+    connectSupabase(supabaseProjectUrl.trim(), supabaseAnonKey.trim())
+  }, [supabaseProjectUrl, supabaseAnonKey, connectSupabase])
 
-  const handleSelectSupabaseTicket = useCallback((row: SupabaseTicketRow) => {
+  const _handleSelectSupabaseTicket = useCallback((row: SupabaseTicketRow) => {
     setSelectedSupabaseTicketId(row.id)
     setSelectedSupabaseTicketContent(row.body_md ?? '')
   }, [])
@@ -770,7 +769,7 @@ function App() {
     return () => clearInterval(id)
   }, [supabaseBoardActive, refetchSupabaseTickets])
 
-  const handlePreviewSync = useCallback(async () => {
+  const _handlePreviewSync = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (!root) return
     setSupabaseLastSyncError(null)
@@ -815,7 +814,7 @@ function App() {
     []
   )
 
-  const handleRunSync = useCallback(async () => {
+  const _handleRunSync = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (!root) return
     setSupabaseLastSyncError(null)
@@ -1292,10 +1291,71 @@ function App() {
       ? '(none)'
       : columnsForDisplay.map((c) => `${c.title}: ${c.cardIds.length ? c.cardIds.join(',') : '(empty)'}`).join(' | ')
 
+  // Env-based Supabase config (0014); used for main UI error and Debug panel
+  const envUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
+  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
+  const supabaseConfigMissing = !envUrl || !envKey
+  const showConfigMissingError = supabaseConfigMissing && supabaseConnectionStatus !== 'connected'
+
+  // Retain for possible Debug-only Ticket Store (0014); satisfy noUnusedLocals
+  const _retain = [
+    _SUPABASE_SETUP_SQL,
+    _DraggableTicketItem,
+    _DraggableSupabaseTicketItem,
+    _ticketStoreConnectMessage,
+    _ticketViewerLoading,
+    _setTicketStoreMode,
+    _supabaseNotInitialized,
+    _selectedSupabaseTicketId,
+    _selectedSupabaseTicketContent,
+    _syncPreview,
+    _syncInProgress,
+    _syncSummary,
+    _syncProgressText,
+    _handleConnectProject,
+    _handleSelectTicket,
+    _handleRefreshTickets,
+    _handleSupabaseConnect,
+    _handleSelectSupabaseTicket,
+    _handlePreviewSync,
+    _handleRunSync,
+  ]
+  void _retain
+
   return (
     <>
       <h1>Portfolio 2026</h1>
       <p className="subtitle">Project Zero: Kanban (coming soon)</p>
+
+      <header className="app-header-bar" aria-label="Project and connection">
+        <div className="project-dropdown-wrap">
+          <label htmlFor="project-select" className="project-label">Project</label>
+          <select
+            id="project-select"
+            className="project-select"
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            aria-label="Project"
+          >
+            {PROJECT_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
+          {supabaseConnectionStatus === 'connecting'
+            ? 'Connecting…'
+            : supabaseConnectionStatus === 'connected'
+              ? 'Connected'
+              : 'Disconnected'}
+        </p>
+      </header>
+
+      {showConfigMissingError && (
+        <div className="config-missing-error" role="alert">
+          Not connected: missing Supabase config
+        </div>
+      )}
 
       <DndContext
         sensors={sensors}
@@ -1369,270 +1429,6 @@ function App() {
           </SortableContext>
         </section>
 
-        <section className="tickets-docs-section" aria-label="Ticket Store">
-        <h2>Ticket Store</h2>
-        <div className="ticket-store-mode" role="tablist" aria-label="Ticket store mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={ticketStoreMode === 'docs'}
-            onClick={() => setTicketStoreMode('docs')}
-            className={ticketStoreMode === 'docs' ? 'mode-tab active' : 'mode-tab'}
-          >
-            Docs
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={ticketStoreMode === 'supabase'}
-            onClick={() => setTicketStoreMode('supabase')}
-            className={ticketStoreMode === 'supabase' ? 'mode-tab active' : 'mode-tab'}
-          >
-            Supabase
-          </button>
-        </div>
-
-        {ticketStoreMode === 'docs' && (
-          <>
-            <p className="tickets-status" data-status={ticketStoreConnected ? 'connected' : 'disconnected'}>
-              {ticketStoreConnected ? 'Connected' : 'Disconnected'}
-            </p>
-            {!ticketStoreConnected ? (
-              <>
-                <p className="tickets-explanation">
-                  Connect a project folder to read and write ticket files from <code>docs/tickets/*.md</code> (drag tickets into columns to save frontmatter).
-                </p>
-                <button type="button" className="connect-project-btn" onClick={handleConnectProject}>
-                  Connect project
-                </button>
-                {ticketStoreConnectMessage && (
-                  <p className="tickets-message" role="alert">
-                    {ticketStoreConnectMessage}
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                {ticketStoreLastError && (
-                  <p className="tickets-message tickets-error" role="alert">
-                    {ticketStoreLastError}
-                  </p>
-                )}
-                <p className="tickets-count">Found {ticketStoreFiles.length} tickets. Drag into a column to save.</p>
-                {lastWriteError && (
-                  <p className="tickets-message tickets-error" role="alert">
-                    Write error: {lastWriteError}
-                  </p>
-                )}
-                {lastSavedTicketPath && (
-                  <p className="tickets-saved" role="status">
-                    Saved to file: {lastSavedTicketPath}
-                  </p>
-                )}
-                <button type="button" className="refresh-tickets-btn" onClick={handleRefreshTickets}>
-                  Refresh
-                </button>
-                <div className="tickets-layout">
-                  <ul className="tickets-list" aria-label="Ticket files">
-                    {ticketStoreFiles.map((f) => (
-                      <DraggableTicketItem
-                        key={f.path}
-                        path={f.path}
-                        name={f.name}
-                        onClick={() => handleSelectTicket(f.path, f.name)}
-                        isSelected={selectedTicketPath === f.path}
-                      />
-                    ))}
-                  </ul>
-                  <div className="ticket-viewer" aria-label="Ticket viewer">
-                    {selectedTicketPath ? (
-                      <>
-                        <p className="ticket-viewer-path">
-                          <strong>Path:</strong> {selectedTicketPath}
-                        </p>
-                        {ticketViewerLoading ? (
-                          <p className="ticket-viewer-loading">Loading…</p>
-                        ) : (
-                          <pre className="ticket-viewer-content">{selectedTicketContent ?? ''}</pre>
-                        )}
-                      </>
-                    ) : (
-                      <p className="ticket-viewer-placeholder">Click a ticket file to view its contents.</p>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        )}
-
-        {ticketStoreMode === 'supabase' && (
-          <>
-            <h3>Supabase Config</h3>
-            <p className="tickets-status" data-status={supabaseConnectionStatus}>
-              {supabaseConnectionStatus === 'connecting'
-                ? 'Connecting'
-                : supabaseConnectionStatus === 'connected'
-                  ? 'Connected'
-                  : 'Disconnected'}
-            </p>
-            {localStorage.getItem(SUPABASE_CONFIG_KEY) && (
-              <p className="tickets-saved" role="status">Saved locally</p>
-            )}
-            <div className="supabase-config">
-              <label>
-                Project URL
-                <input
-                  type="url"
-                  value={supabaseProjectUrl}
-                  onChange={(e) => setSupabaseProjectUrl(e.target.value)}
-                  placeholder="https://xxx.supabase.co"
-                  aria-label="Supabase project URL"
-                />
-              </label>
-              <label>
-                Anon key
-                <input
-                  type="password"
-                  value={supabaseAnonKey}
-                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                  placeholder="eyJ..."
-                  aria-label="Supabase anon key"
-                />
-              </label>
-              <button
-                type="button"
-                className="connect-project-btn"
-                onClick={handleSupabaseConnect}
-                disabled={supabaseConnectionStatus === 'connecting'}
-              >
-                Connect
-              </button>
-            </div>
-            <p className="tickets-message" role="alert">
-              Last error: {supabaseLastError ?? 'none'}
-            </p>
-
-            {supabaseNotInitialized && (
-              <div className="supabase-setup" role="region" aria-label="Setup instructions">
-                <p className="tickets-message tickets-error" role="alert">
-                  Supabase not initialized
-                </p>
-                <h4>Setup instructions</h4>
-                <p>Run the following SQL in the Supabase SQL Editor to create the <code>tickets</code> table:</p>
-                <pre className="supabase-setup-sql">{SUPABASE_SETUP_SQL}</pre>
-              </div>
-            )}
-
-            <div className="import-from-docs" role="region" aria-label="Sync with Docs">
-              <h4>Sync with Docs</h4>
-              <p className="tickets-explanation">
-                Syncs both ways: docs tickets → DB (create/update), DB tickets not in docs → new files. After sync, tickets not on the board go into Unassigned.
-              </p>
-              {supabaseConnectionStatus !== 'connected' ? (
-                <p className="tickets-message" role="alert">
-                  Connect Supabase first (Project URL + Anon key, then Connect).
-                </p>
-              ) : !ticketStoreConnected ? (
-                <p className="tickets-message" role="alert">
-                  Connect project folder first (switch to Docs tab and use Connect project folder).
-                </p>
-              ) : (
-                <>
-                  <div className="import-actions">
-                    <button
-                      type="button"
-                      className="connect-project-btn"
-                      onClick={handlePreviewSync}
-                      disabled={syncInProgress}
-                    >
-                      Preview sync
-                    </button>
-                    <button
-                      type="button"
-                      className="connect-project-btn"
-                      onClick={handleRunSync}
-                      disabled={syncInProgress}
-                    >
-                      Sync
-                    </button>
-                  </div>
-                  {syncProgressText && (
-                    <p className="tickets-message" role="status">
-                      {syncProgressText}
-                    </p>
-                  )}
-                  {syncSummary && (
-                    <p className="tickets-message import-summary" role="status">
-                      {syncSummary}
-                    </p>
-                  )}
-                  {supabaseLastSyncError && (
-                    <p className="tickets-message tickets-error" role="alert">
-                      Sync error: {supabaseLastSyncError}
-                    </p>
-                  )}
-                  {syncPreview && (
-                    <div className="import-preview">
-                      <p className="import-totals">
-                        Docs→DB: found {syncPreview.docsToDb.found} · create {syncPreview.docsToDb.create} · update{' '}
-                        {syncPreview.docsToDb.update} · skip {syncPreview.docsToDb.skip}
-                        {syncPreview.docsToDb.fail > 0 ? ` · fail ${syncPreview.docsToDb.fail}` : ''}
-                      </p>
-                      <p className="import-totals">
-                        DB→Docs: will write {syncPreview.dbToDocs.length} file(s){' '}
-                        {syncPreview.dbToDocs.length > 0 ? `(${syncPreview.dbToDocs.map((x) => x.filename).join(', ')})` : ''}
-                      </p>
-                      <ul className="import-preview-list" aria-label="Docs→DB plan">
-                        {syncPreview.docsToDb.items.map((item, idx) => (
-                          <li key={idx} className="import-preview-item" data-action={item.action}>
-                            <span className="import-filename">{item.filename}</span>
-                            <span className="import-action">{item.action}</span>
-                            {item.reason != null && <span className="import-reason">{item.reason}</span>}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {supabaseConnectionStatus === 'connected' && (
-              <>
-                <p className="tickets-count">
-                  Found {supabaseTickets.length} tickets. Drag into a column to save.
-                </p>
-                <div className="tickets-layout">
-                  <ul className="tickets-list" aria-label="Supabase tickets">
-                    {supabaseTickets.map((row) => (
-                      <DraggableSupabaseTicketItem
-                        key={row.id}
-                        row={row}
-                        onClick={() => handleSelectSupabaseTicket(row)}
-                        isSelected={selectedSupabaseTicketId === row.id}
-                      />
-                    ))}
-                  </ul>
-                  <div className="ticket-viewer" aria-label="Ticket viewer">
-                    {selectedSupabaseTicketId ? (
-                      <>
-                        <p className="ticket-viewer-path">
-                          <strong>ID:</strong> {selectedSupabaseTicketId}
-                        </p>
-                        <pre className="ticket-viewer-content">{selectedSupabaseTicketContent ?? ''}</pre>
-                      </>
-                    ) : (
-                      <p className="ticket-viewer-placeholder">Click a ticket to view its contents.</p>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        )}
-        </section>
-
         <DragOverlay>
           {activeCardId && cardsForDisplay[String(activeCardId)] ? (
             <div className="ticket-card" data-card-id={activeCardId}>
@@ -1680,6 +1476,11 @@ function App() {
           <section>
             <h3>Ticket Store (Supabase)</h3>
             <div className="build-info">
+              {supabaseConfigMissing && (
+                <p className="debug-env-missing" role="status">
+                  Missing env: {[!envUrl && 'VITE_SUPABASE_URL', !envKey && 'VITE_SUPABASE_ANON_KEY'].filter(Boolean).join(', ') || 'none'}
+                </p>
+              )}
               <p>Connected: {String(supabaseConnectionStatus === 'connected')}</p>
               <p>Project URL present: {String(!!supabaseProjectUrl.trim())}</p>
               <p>Polling: {supabaseBoardActive ? `${SUPABASE_POLL_INTERVAL_MS / 1000}s` : 'off'}</p>

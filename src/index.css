@@ -30,6 +30,53 @@ h1 {
   margin: 0 0 1.5rem 0;
 }
 
+/* App header: project dropdown + connection status (0014) */
+.app-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.project-dropdown-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.project-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.project-select {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+}
+.connection-status {
+  font-size: 0.9rem;
+  margin: 0;
+}
+.connection-status[data-status="connected"] {
+  color: #0a6b0a;
+}
+.connection-status[data-status="disconnected"] {
+  color: #666;
+}
+.connection-status[data-status="connecting"] {
+  color: #888;
+}
+.config-missing-error {
+  padding: 0.75rem 1rem;
+  background: #fef3cd;
+  border: 1px solid #e0c040;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+  color: #856404;
+}
+
 /* Columns section */
 .columns-section {
   margin-bottom: 1.5rem;
