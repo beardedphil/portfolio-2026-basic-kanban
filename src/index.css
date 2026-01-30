@@ -67,6 +67,11 @@ h1 {
   border: 1px solid #ccc;
   border-radius: 4px;
 }
+.add-column-error {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: #c00;
+}
 .add-column-form .form-actions {
   display: flex;
   gap: 0.5rem;

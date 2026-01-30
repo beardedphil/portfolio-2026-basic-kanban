@@ -37,6 +37,10 @@ function stableColumnId(): string {
     : `col-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase()
+}
+
 function SortableColumn({
   col,
   onRemove,
@@ -89,6 +93,7 @@ function App() {
   const [columns, setColumns] = useState<Column[]>([])
   const [showAddColumnForm, setShowAddColumnForm] = useState(false)
   const [newColumnTitle, setNewColumnTitle] = useState('')
+  const [addColumnError, setAddColumnError] = useState<string | null>(null)
 
   const addLog = useCallback((message: string) => {
     const at = formatTime()
@@ -105,15 +110,24 @@ function App() {
   const handleCreateColumn = useCallback(() => {
     const title = newColumnTitle.trim()
     if (!title) return
+    const normalized = normalizeTitle(title)
+    const isDuplicate = columns.some((c) => normalizeTitle(c.title) === normalized)
+    if (isDuplicate) {
+      setAddColumnError('Column title must be unique.')
+      addLog(`Column add blocked (duplicate): "${normalized}"`)
+      return
+    }
+    setAddColumnError(null)
     const col: Column = { id: stableColumnId(), title }
     setColumns((prev) => [...prev, col])
     setNewColumnTitle('')
     setShowAddColumnForm(false)
     addLog(`Column added: "${title}"`)
-  }, [newColumnTitle, addLog])
+  }, [newColumnTitle, columns, addLog])
 
   const handleCancelAddColumn = useCallback(() => {
     setNewColumnTitle('')
+    setAddColumnError(null)
     setShowAddColumnForm(false)
   }, [])
 
@@ -160,7 +174,10 @@ function App() {
         <button
           type="button"
           className="add-column-btn"
-          onClick={() => setShowAddColumnForm(true)}
+          onClick={() => {
+            setAddColumnError(null)
+            setShowAddColumnForm(true)
+          }}
           aria-expanded={showAddColumnForm}
         >
           Add column
@@ -170,11 +187,21 @@ function App() {
             <input
               type="text"
               value={newColumnTitle}
-              onChange={(e) => setNewColumnTitle(e.target.value)}
+              onChange={(e) => {
+                setNewColumnTitle(e.target.value)
+                setAddColumnError(null)
+              }}
               placeholder="Column name"
               autoFocus
               aria-label="Column name"
+              aria-invalid={!!addColumnError}
+              aria-describedby={addColumnError ? 'add-column-error' : undefined}
             />
+            {addColumnError && (
+              <p id="add-column-error" className="add-column-error" role="alert">
+                {addColumnError}
+              </p>
+            )}
             <div className="form-actions">
               <button type="button" onClick={handleCreateColumn}>
                 Create
