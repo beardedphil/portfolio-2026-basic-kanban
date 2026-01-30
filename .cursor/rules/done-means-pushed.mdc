@@ -11,9 +11,11 @@ alwaysApply: true
   before telling the user or project manager that it’s done.
 - Agents must not delegate commit/push work to the user/PM (e.g., “after you commit and push…”).
   - If commit/push hasn’t happened yet, the correct status is **“not ready for verification.”**
-- “Done/ready” messages must include:
-  - the **commit hash(es)** for the ticket, and
-  - the exact `git status -sb` output showing the branch is synced and the working tree is clean.
+- “Done/ready” messages must include the exact `git status -sb` output showing the branch is synced and the working tree is clean.
+
+## Commit message linkage (no commit hashes in docs)
+
+- Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. `feat(0010): ...`, `fix(0008): ...`, `docs(0009): ...`).
 
 ## PM verification
 

@@ -51,28 +51,26 @@ Create a task folder under `docs/audit/`:
 ## Ready-for-Verification (Commit + Push)
 
 - An implementation agent must **commit** all work for the ticket and **push** it to the remote before claiming the ticket is “done” or “ready for verification.”
-- The agent must record the **commit hash(es)** in `docs/audit/<task-id>-<short-title>/worklog.md`.
 - “Ready for verification” additionally requires a **clean + synced repo**:
   - working tree is clean (no uncommitted changes, no untracked files created by the task)
   - branch is synced with remote (not ahead/behind)
-  - the agent must paste the output of `git status -sb` into the worklog
 - The ticket file itself must be **committed to the repo**:
   - `docs/tickets/<task-id>-<short-title>.md` must exist on the branch being verified.
 
 - “Ready for verification” instructions must be **UI-only**:
   - Do not ask the user/PM to commit, push, or otherwise “finish” the task.
-  - If the agent still needs to commit/push or update the worklog with commit hash + `git status -sb`, the task is **not** ready.
+  - If the agent still needs to commit/push or update audit artifacts, the task is **not** ready.
 
 - The completion message to the user/PM must include:
-  - the pushed **commit hash(es)**, and
   - the exact `git status -sb` output.
-
-- `worklog.md` must not contain placeholders like “After committing: add commit hash(es) here.”
-  - If placeholders remain, the task is not ready.
 
 - Audit artifacts must be **in git**:
   - `docs/audit/<task-id>-<short-title>/` must be committed and pushed before claiming “ready.”
-  - The `worklog.md` must reflect the pushed commit(s), not a pre-commit state.
+  - `worklog.md` must not contain “handoff chores” (e.g. “after you commit…”).
+
+## Commit message linkage (no commit hashes in docs)
+
+- Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. `feat(0010): ...`, `fix(0008): ...`, `docs(0009): ...`).
  
 Note: Workspace-wide, the definition of “done” for **all agents** is enforced by `.cursor/rules/done-means-pushed.mdc`.
 

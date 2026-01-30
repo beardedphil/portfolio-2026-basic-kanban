@@ -47,7 +47,7 @@ Create a new file at `docs/tickets/<task-id>-<short-title>.md` using this templa
 
 Create `docs/audit/<task-id>-<short-title>/` containing:
 - `plan.md`
-- `worklog.md` (must include commit hash(es) + `git status -sb` output when ready)
+- `worklog.md`
 - `changed-files.md`
 - `decisions.md`
 - `verification.md` (UI-only)

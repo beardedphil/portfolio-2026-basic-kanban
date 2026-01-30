@@ -10,8 +10,8 @@ We will expand these rules as we learn.
 - **Audit folder exists**: `docs/audit/<id>-<short-title>/`
 - **Work is committed + pushed**:
   - the implementation agent has committed all changes and pushed them to the remote before declaring “ready for verification”
-  - the commit hash is recorded in `docs/audit/<id>-<short-title>/worklog.md`
-  - the worklog includes `git status -sb` output showing the branch is not ahead/behind and the working tree is clean
+  - all commits for the ticket include the ticket ID in the commit subject (e.g. `feat(0010): ...`)
+  - the agent’s completion message includes `git status -sb` output showing the branch is not ahead/behind and the working tree is clean
 - **Required audit artifacts exist**:
   - `plan.md`
   - `worklog.md`
