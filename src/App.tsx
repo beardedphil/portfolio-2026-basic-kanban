@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -12,7 +12,6 @@ import {
   useDroppable,
   type CollisionDetection,
   type DragEndEvent,
-  type DragOverEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core'
 import {
@@ -159,7 +158,6 @@ function App() {
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [addColumnError, setAddColumnError] = useState<string | null>(null)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
-  const recentlyMovedToNewContainer = useRef(false)
 
   const addLog = useCallback((message: string) => {
     const at = formatTime()
@@ -210,19 +208,10 @@ function App() {
         lastOverId.current = overId
         return [{ id: overId }]
       }
-      if (recentlyMovedToNewContainer.current) {
-        lastOverId.current = args.active.id
-      }
       return lastOverId.current ? [{ id: lastOverId.current }] : []
     },
     [findColumnById]
   )
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      recentlyMovedToNewContainer.current = false
-    })
-  }, [columns])
 
   const handleCreateColumn = useCallback(() => {
     const title = newColumnTitle.trim()
@@ -257,44 +246,10 @@ function App() {
     [columns, addLog]
   )
 
-  const handleDragOver = useCallback(
-    (event: DragOverEvent) => {
-      const { active, over } = event
-      if (!over?.id || isColumnId(active.id)) return
-      const overId = over.id
-      const overColumn = findColumnById(String(overId))
-      const activeColumn = findColumnByCardId(String(active.id))
-      if (!overColumn || !activeColumn || activeColumn.id === overColumn.id) return
-      setColumns((prev) => {
-        const overCol = prev.find((c) => c.id === overColumn.id)!
-        const overItems = overCol.cardIds
-        const overIndex = overItems.indexOf(String(overId))
-        let newIndex: number
-        if (overIndex >= 0) {
-          const isBelowOver =
-            active.rect.current.translated &&
-            over.rect &&
-            active.rect.current.translated.top > over.rect.top + over.rect.height / 2
-          newIndex = isBelowOver ? overIndex + 1 : overIndex
-        } else {
-          newIndex = overItems.length
-        }
-        recentlyMovedToNewContainer.current = true
-        return prev.map((c) => {
-          if (c.id === activeColumn.id) {
-            return { ...c, cardIds: c.cardIds.filter((id) => id !== active.id) }
-          }
-          if (c.id === overColumn.id) {
-            const without = c.cardIds.filter((id) => id !== active.id)
-            const insert = [...without.slice(0, newIndex), String(active.id), ...without.slice(newIndex)]
-            return { ...c, cardIds: insert }
-          }
-          return c
-        })
-      })
-    },
-    [findColumnById, findColumnByCardId, isColumnId]
-  )
+  const handleDragOver = useCallback(() => {
+    // State is updated only on drop (handleDragEnd) so that cross-column moves
+    // see the correct source column and persist.
+  }, [])
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -325,7 +280,8 @@ function App() {
       const isSameColumn = sourceColumn.id === overColumn.id
 
       if (isSameColumn) {
-        const overIndex = overColumn.cardIds.indexOf(String(overId))
+        let overIndex = overColumn.cardIds.indexOf(String(overId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
         if (activeIndex === overIndex) return
         setColumns((prev) =>
           prev.map((c) =>
@@ -342,9 +298,8 @@ function App() {
         ).join(',')
         addLog(`Card reordered in ${colTitle}: ${oldOrder} -> ${newOrder} (card: ${card?.title ?? active.id})`)
       } else {
-        const overIndex = overColumn.cardIds.includes(String(overId))
-          ? overColumn.cardIds.indexOf(String(overId))
-          : overColumn.cardIds.length
+        let overIndex = overColumn.cardIds.indexOf(String(overId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
         setColumns((prev) =>
           prev.map((c) => {
             if (c.id === sourceColumn.id) {
@@ -363,10 +318,14 @@ function App() {
         const card = cards[String(active.id)]
         const fromTitle = sourceColumn.title
         const toTitle = overColumn.title
-        const fromPos = activeIndex + 1
-        const toPos = overIndex + 1
+        const fromBefore = sourceCardIds.map((id) => cards[id]?.title ?? id).join(',')
+        const fromAfter = sourceCardIds.filter((id) => id !== active.id).map((id) => cards[id]?.title ?? id).join(',')
+        const toBefore = overColumn.cardIds.map((id) => cards[id]?.title ?? id).join(',')
+        const toAfter = [...overColumn.cardIds.slice(0, overIndex), String(active.id), ...overColumn.cardIds.slice(overIndex)]
+          .map((id) => cards[id]?.title ?? id)
+          .join(',')
         addLog(
-          `Card moved from ${fromTitle} (pos ${fromPos}) to ${toTitle} (pos ${toPos}): ${card?.title ?? active.id}`
+          `Card moved from ${fromTitle} [${fromBefore}] to ${toTitle} [${toBefore}]; after: ${fromTitle} [${fromAfter}], ${toTitle} [${toAfter}] (${card?.title ?? active.id})`
         )
       }
     },
