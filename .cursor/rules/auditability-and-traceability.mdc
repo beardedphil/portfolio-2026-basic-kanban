@@ -62,6 +62,13 @@ Create a task folder under `docs/audit/`:
 - “Ready for verification” instructions must be **UI-only**:
   - Do not ask the user/PM to commit, push, or otherwise “finish” the task.
   - If the agent still needs to commit/push or update the worklog with commit hash + `git status -sb`, the task is **not** ready.
+
+- The completion message to the user/PM must include:
+  - the pushed **commit hash(es)**, and
+  - the exact `git status -sb` output.
+
+- `worklog.md` must not contain placeholders like “After committing: add commit hash(es) here.”
+  - If placeholders remain, the task is not ready.
  
 Note: Workspace-wide, the definition of “done” for **all agents** is enforced by `.cursor/rules/done-means-pushed.mdc`.
 
