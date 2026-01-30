@@ -1325,7 +1325,7 @@ function App() {
   return (
     <>
       <h1>Portfolio 2026</h1>
-      <p className="subtitle">Project Zero: Kanban (coming soon)</p>
+      <p className="subtitle">Project Zero: Kanban</p>
 
       <header className="app-header-bar" aria-label="Project and connection">
         <div className="project-dropdown-wrap">
