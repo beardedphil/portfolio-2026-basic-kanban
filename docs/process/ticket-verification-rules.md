@@ -12,6 +12,8 @@ We will expand these rules as we learn.
   - the implementation agent has committed all changes and pushed them to the remote before declaring “ready for verification”
   - all commits for the ticket include the ticket ID in the commit subject (e.g. `feat(0010): ...`)
   - the agent’s completion message includes `git status -sb` output showing the branch is not ahead/behind and the working tree is clean
+- **Repo cleanliness**:
+  - no untracked files may remain from the task (unless explicitly ignored and documented as a generated artifact)
 - **Required audit artifacts exist**:
   - `plan.md`
   - `worklog.md`

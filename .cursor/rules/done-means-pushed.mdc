@@ -16,6 +16,7 @@ alwaysApply: true
 ## Commit message linkage (no commit hashes in docs)
 
 - Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. `feat(0010): ...`, `fix(0008): ...`, `docs(0009): ...`).
+- If `git status -sb` is not clean/synced, the agent must say **“not ready for verification”** and keep working until it is.
 
 ## PM verification
 

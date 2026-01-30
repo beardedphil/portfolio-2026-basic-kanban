@@ -54,6 +54,9 @@ Create a task folder under `docs/audit/`:
 - “Ready for verification” additionally requires a **clean + synced repo**:
   - working tree is clean (no uncommitted changes, no untracked files created by the task)
   - branch is synced with remote (not ahead/behind)
+- If any untracked/modified files remain, the agent must either:
+  - commit them (if they belong to the ticket), or
+  - delete/ignore/revert them (if they are accidental/generated), before claiming “ready.”
 - The ticket file itself must be **committed to the repo**:
   - `docs/tickets/<task-id>-<short-title>.md` must exist on the branch being verified.
 
