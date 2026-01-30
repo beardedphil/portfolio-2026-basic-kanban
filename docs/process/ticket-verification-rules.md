@@ -33,6 +33,7 @@ We will expand these rules as we learn.
 ## PM review checklist (quick)
 
 - **Scope discipline**: change matches ticket; no extra features slipped in
+- **No unrequested UI changes**: styling/behavior outside the ticket did not change unless explicitly documented in `decisions.md`
 - **Traceability**: `changed-files.md` matches what actually changed
 - **Risk notes**: `decisions.md` lists meaningful assumptions/trade-offs
 
