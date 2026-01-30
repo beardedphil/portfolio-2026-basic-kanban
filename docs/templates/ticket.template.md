@@ -10,6 +10,11 @@ Create a new file at `docs/tickets/<task-id>-<short-title>.md` using this templa
 - **Type**: Feature / Bug / Chore
 - **Priority**: P0 / P1 / P2
 
+## Linkage (for tracking)
+
+- **Fixes**: `<ticket-id>` (required for bugfix tickets)
+- **Category**: DnD / State / CSS / Build / Process / Other (required for bugfix tickets)
+
 ## Goal (one sentence)
 
 <what we want to achieve>
