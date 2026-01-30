@@ -1,0 +1,13 @@
+---
+description: Conversation protocol (one question or one task)
+alwaysApply: true
+---
+
+# Conversation Protocol
+
+- You may provide as much information as you want in each response, but you may only:
+  - ask the user **one** question, OR
+  - provide the user **one** task to complete.
+- Do not bundle multiple questions; spread them across messages.
+- When the user provides a new agent rule, record it in `.cursor/rules/` at the workspace root (not inside individual project folders).
+- After updating any rule file(s), explicitly state **which** `.cursor/rules/*.mdc` file(s) were updated.

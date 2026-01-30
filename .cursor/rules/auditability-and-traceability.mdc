@@ -1,0 +1,56 @@
+---
+description: Auditability and traceability requirements for all agent work
+alwaysApply: true
+---
+
+# Auditability (Always On)
+
+For any coding task assigned to an implementation agent, the work must be **fully auditable**.
+
+## Standard Prompt Format
+
+- All new stories/tasks must be written using the workspace template:
+  - `docs/templates/agent-task-prompt.template.md`
+- The exact, filled-in prompt must be saved as:
+  - `docs/audit/<task-id>-<short-title>/prompt.md`
+
+## Task ID Convention (Uniqueness)
+
+- Task IDs must be **sequential numbers**, zero-padded to 4 digits (e.g. `0001`, `0002`, ...).
+- Task IDs must remain **globally unique** within this workspace; they will be used as keys later.
+
+## Required Artifacts (per task)
+
+Create a task folder under `docs/audit/`:
+
+- `docs/audit/<task-id>-<short-title>/prompt.md`
+  - Exact prompt text used (copy/paste), including acceptance criteria.
+- `docs/audit/<task-id>-<short-title>/plan.md`
+  - 3–10 bullets: intended approach and file touchpoints.
+- `docs/audit/<task-id>-<short-title>/worklog.md`
+  - Timestamped (rough) notes of what was done, in order.
+- `docs/audit/<task-id>-<short-title>/changed-files.md`
+  - List of files created/modified/deleted with 1–2 line purpose each.
+- `docs/audit/<task-id>-<short-title>/decisions.md`
+  - Any trade-offs/assumptions + why.
+- `docs/audit/<task-id>-<short-title>/verification.md`
+  - Human-verifiable steps **inside the app UI** (no console/devtools).
+  - If verification involves visuals, include screenshot filenames.
+
+## In-App Trace Requirement
+
+- Any meaningful state change performed by the app should be visible in an **in-app debug/diagnostics UI** (not the console).
+- Errors should have an in-app representation suitable for a non-technical verifier.
+
+## Scope
+
+- These artifacts live at the **workspace level** (not inside individual project folders).
+- Keep each artifact concise; prefer bullets over prose.
+
+## PM Review Artifact (after implementation completes)
+
+- Create `docs/audit/<task-id>-<short-title>/pm-review.md` using:
+  - `docs/templates/pm-review.template.md`
+- The PM review must include:
+  - **likelihood of success** (0–100%)
+  - a ranked list of **potential failures** and how to diagnose them using **in-app** diagnostics
