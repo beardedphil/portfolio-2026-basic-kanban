@@ -69,6 +69,10 @@ Create a task folder under `docs/audit/`:
 
 - `worklog.md` must not contain placeholders like “After committing: add commit hash(es) here.”
   - If placeholders remain, the task is not ready.
+
+- Audit artifacts must be **in git**:
+  - `docs/audit/<task-id>-<short-title>/` must be committed and pushed before claiming “ready.”
+  - The `worklog.md` must reflect the pushed commit(s), not a pre-commit state.
  
 Note: Workspace-wide, the definition of “done” for **all agents** is enforced by `.cursor/rules/done-means-pushed.mdc`.
 
