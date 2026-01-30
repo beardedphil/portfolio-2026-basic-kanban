@@ -269,6 +269,11 @@ h1 {
 .tickets-message.tickets-error {
   color: #c00;
 }
+.tickets-saved {
+  font-size: 0.875rem;
+  margin: 0.5rem 0 0 0;
+  color: #0a7;
+}
 .tickets-count {
   font-size: 0.9rem;
   margin: 0 0 0.5rem 0;

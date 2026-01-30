@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -11,6 +11,7 @@ import {
   useSensor,
   useSensors,
   useDroppable,
+  useDraggable,
   type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
@@ -25,6 +26,13 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import {
+  parseFrontmatter,
+  getKanbanFromFrontmatter,
+  updateKanbanInContent,
+  type KanbanFrontmatter,
+} from './frontmatter'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 type LogEntry = { id: number; message: string; at: string }
 type Card = { id: string; title: string }
@@ -32,10 +40,42 @@ type Column = { id: string; title: string; cardIds: string[] }
 
 type TicketFile = { name: string; path: string }
 
+/** Supabase tickets table row (read-only v0) */
+type SupabaseTicketRow = {
+  id: string
+  filename: string
+  title: string
+  body_md: string
+  kanban_column_id: string | null
+  kanban_position: number | null
+  kanban_moved_at: string | null
+  updated_at: string
+}
+
+const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
+const SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
+  id text primary key,
+  filename text not null,
+  title text not null,
+  body_md text not null,
+  kanban_column_id text null,
+  kanban_position int null,
+  kanban_moved_at timestamptz null,
+  updated_at timestamptz not null default now()
+);`
+
 const DEFAULT_COLUMNS: Column[] = [
   { id: 'col-todo', title: 'To-do', cardIds: ['c-1', 'c-2', 'c-3'] },
   { id: 'col-doing', title: 'Doing', cardIds: ['c-4', 'c-5', 'c-6'] },
   { id: 'col-done', title: 'Done', cardIds: ['c-7', 'c-8', 'c-9'] },
+]
+
+/** Same three columns with empty cardIds; used when connected and filled from frontmatter */
+const KANBAN_COLUMN_IDS = ['col-todo', 'col-doing', 'col-done'] as const
+const EMPTY_KANBAN_COLUMNS: Column[] = [
+  { id: 'col-todo', title: 'To-do', cardIds: [] },
+  { id: 'col-doing', title: 'Doing', cardIds: [] },
+  { id: 'col-done', title: 'Done', cardIds: [] },
 ]
 
 const INITIAL_CARDS: Record<string, Card> = {
@@ -99,10 +139,12 @@ function SortableColumn({
   col,
   cards,
   onRemove,
+  hideRemove = false,
 }: {
   col: Column
   cards: Record<string, Card>
   onRemove: (id: string) => void
+  hideRemove?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: col.id,
@@ -127,14 +169,16 @@ function SortableColumn({
         <span className="column-title" {...attributes} {...listeners}>
           {col.title}
         </span>
-        <button
-          type="button"
-          className="column-remove"
-          onClick={() => onRemove(col.id)}
-          aria-label={`Remove column ${col.title}`}
-        >
-          Remove
-        </button>
+        {!hideRemove && (
+          <button
+            type="button"
+            className="column-remove"
+            onClick={() => onRemove(col.id)}
+            aria-label={`Remove column ${col.title}`}
+          >
+            Remove
+          </button>
+        )}
       </div>
       <div
         ref={setDroppableRef}
@@ -152,6 +196,42 @@ function SortableColumn({
   )
 }
 
+function DraggableTicketItem({
+  path,
+  name,
+  onClick,
+  isSelected,
+}: {
+  path: string
+  name: string
+  onClick: () => void
+  isSelected: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: path,
+    data: { type: 'ticket-from-list', path },
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <li ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <button
+        type="button"
+        className="ticket-file-btn"
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+        aria-pressed={isSelected}
+      >
+        {name}
+      </button>
+    </li>
+  )
+}
+
 function App() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [actionLog, setActionLog] = useState<LogEntry[]>([])
@@ -164,7 +244,7 @@ function App() {
   const [activeCardId, setActiveCardId] = useState<UniqueIdentifier | null>(null)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
 
-  // Ticket Store (Docs read-only)
+  // Ticket Store (Docs read + write when connected with readwrite)
   const [ticketStoreConnected, setTicketStoreConnected] = useState(false)
   const [ticketStoreRootHandle, setTicketStoreRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [ticketStoreFiles, setTicketStoreFiles] = useState<TicketFile[]>([])
@@ -174,9 +254,55 @@ function App() {
   const [selectedTicketPath, setSelectedTicketPath] = useState<string | null>(null)
   const [selectedTicketContent, setSelectedTicketContent] = useState<string | null>(null)
   const [ticketViewerLoading, setTicketViewerLoading] = useState(false)
+  // Kanban-from-docs state (used when connected)
+  const [ticketColumns, setTicketColumns] = useState<Column[]>(() => EMPTY_KANBAN_COLUMNS)
+  const [ticketCards, setTicketCards] = useState<Record<string, Card>>({})
+  const [lastSavedTicketPath, setLastSavedTicketPath] = useState<string | null>(null)
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const [lastWriteError, setLastWriteError] = useState<string | null>(null)
+
+  // Ticket Store mode: Docs (folder) vs Supabase
+  const [ticketStoreMode, setTicketStoreMode] = useState<'docs' | 'supabase'>('docs')
+  // Supabase (read-only v0)
+  const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
+  const [supabaseConnectionStatus, setSupabaseConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
+  const [supabaseLastError, setSupabaseLastError] = useState<string | null>(null)
+  const [supabaseTickets, setSupabaseTickets] = useState<SupabaseTicketRow[]>([])
+  const [supabaseLastRefresh, setSupabaseLastRefresh] = useState<Date | null>(null)
+  const [supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
+  const [selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
+  const [selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
+
+  // Load Supabase config from localStorage (not committed to git)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SUPABASE_CONFIG_KEY)
+      if (raw) {
+        const { projectUrl, anonKey } = JSON.parse(raw) as { projectUrl?: string; anonKey?: string }
+        if (projectUrl) setSupabaseProjectUrl(projectUrl)
+        if (anonKey) setSupabaseAnonKey(anonKey)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const columnsForDisplay = ticketStoreConnected ? ticketColumns : columns
+  const cardsForDisplay = ticketStoreConnected ? ticketCards : cards
+
+  useEffect(() => {
+    if (!lastSavedTicketPath) return
+    const t = setTimeout(() => {
+      setLastSavedTicketPath(null)
+      setLastSavedAt(null)
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [lastSavedTicketPath])
 
   const refreshTicketStore = useCallback(async (root: FileSystemDirectoryHandle) => {
     setTicketStoreLastError(null)
+    setLastWriteError(null)
     try {
       const docs = await root.getDirectoryHandle('docs')
       const tickets = await docs.getDirectoryHandle('tickets')
@@ -188,10 +314,44 @@ function App() {
       }
       files.sort((a, b) => a.name.localeCompare(b.name))
       setTicketStoreFiles(files)
+
+      const ticketCardsMap: Record<string, Card> = {}
+      const byColumn: Record<string, { path: string; position: number }[]> = {
+        'col-todo': [],
+        'col-doing': [],
+        'col-done': [],
+      }
+      for (const f of files) {
+        ticketCardsMap[f.path] = { id: f.path, title: f.name.replace(/\.md$/, '') }
+        try {
+          const fileHandle = await tickets.getFileHandle(f.name)
+          const file = await fileHandle.getFile()
+          const text = await file.text()
+          const { frontmatter } = parseFrontmatter(text)
+          const kanban = getKanbanFromFrontmatter(frontmatter)
+          if (kanban.kanbanColumnId && KANBAN_COLUMN_IDS.includes(kanban.kanbanColumnId as (typeof KANBAN_COLUMN_IDS)[number])) {
+            const pos = typeof kanban.kanbanPosition === 'number' ? kanban.kanbanPosition : 0
+            byColumn[kanban.kanbanColumnId].push({ path: f.path, position: pos })
+          }
+        } catch {
+          // skip frontmatter for this file
+        }
+      }
+      for (const id of KANBAN_COLUMN_IDS) {
+        byColumn[id].sort((a, b) => a.position - b.position)
+      }
+      setTicketCards(ticketCardsMap)
+      setTicketColumns([
+        { id: 'col-todo', title: 'To-do', cardIds: byColumn['col-todo'].map((x) => x.path) },
+        { id: 'col-doing', title: 'Doing', cardIds: byColumn['col-doing'].map((x) => x.path) },
+        { id: 'col-done', title: 'Done', cardIds: byColumn['col-done'].map((x) => x.path) },
+      ])
       setTicketStoreLastRefresh(new Date())
     } catch {
       setTicketStoreLastError('No `docs/tickets` folder found.')
       setTicketStoreFiles([])
+      setTicketCards({})
+      setTicketColumns(EMPTY_KANBAN_COLUMNS)
       setTicketStoreLastRefresh(new Date())
     }
   }, [])
@@ -203,7 +363,7 @@ function App() {
       return
     }
     try {
-      const root = await window.showDirectoryPicker()
+      const root = await window.showDirectoryPicker({ mode: 'readwrite' })
       setTicketStoreConnected(true)
       setTicketStoreRootHandle(root)
       await refreshTicketStore(root)
@@ -245,6 +405,86 @@ function App() {
     if (root) await refreshTicketStore(root)
   }, [ticketStoreRootHandle, refreshTicketStore])
 
+  const handleSupabaseConnect = useCallback(async () => {
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    setSupabaseLastError(null)
+    setSupabaseNotInitialized(false)
+    if (!url || !key) {
+      setSupabaseLastError('Project URL and Anon key are required.')
+      return
+    }
+    setSupabaseConnectionStatus('connecting')
+    try {
+      const client = createClient(url, key)
+      // Test query: verify table exists and is readable
+      const { data: testData, error: testError } = await client
+        .from('tickets')
+        .select('id')
+        .limit(1)
+      if (testError) {
+        const code = (testError as { code?: string }).code
+        const msg = testError.message ?? String(testError)
+        if (code === '42P01' || msg.toLowerCase().includes('relation') || msg.toLowerCase().includes('does not exist')) {
+          setSupabaseNotInitialized(true)
+          setSupabaseLastError('Supabase not initialized (tickets table missing).')
+        } else {
+          setSupabaseLastError(msg)
+        }
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+        return
+      }
+      const { data: rows, error } = await client
+        .from('tickets')
+        .select('id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+        .order('id')
+      if (error) {
+        setSupabaseLastError(error.message ?? String(error))
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+        return
+      }
+      setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
+      setSupabaseLastRefresh(new Date())
+      setSupabaseConnectionStatus('connected')
+      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ projectUrl: url, anonKey: key }))
+    } catch (e) {
+      setSupabaseLastError(e instanceof Error ? e.message : String(e))
+      setSupabaseConnectionStatus('disconnected')
+      setSupabaseTickets([])
+    }
+  }, [supabaseProjectUrl, supabaseAnonKey])
+
+  const handleSelectSupabaseTicket = useCallback((row: SupabaseTicketRow) => {
+    setSelectedSupabaseTicketId(row.id)
+    setSelectedSupabaseTicketContent(row.body_md ?? '')
+  }, [])
+
+  const writeTicketKanbanFrontmatter = useCallback(
+    async (
+      root: FileSystemDirectoryHandle,
+      path: string,
+      updates: KanbanFrontmatter
+    ): Promise<void> => {
+      const name = path.split('/').pop() ?? path
+      const docs = await root.getDirectoryHandle('docs')
+      const tickets = await docs.getDirectoryHandle('tickets')
+      const fileHandle = await tickets.getFileHandle(name, { create: false })
+      if (fileHandle.requestPermission) {
+        const perm = await fileHandle.requestPermission({ mode: 'readwrite' })
+        if (perm !== 'granted') throw new Error('Write permission denied.')
+      }
+      const file = await fileHandle.getFile()
+      const content = await file.text()
+      const newContent = updateKanbanInContent(content, updates)
+      const writable = await fileHandle.createWritable()
+      await writable.write(newContent)
+      await writable.close()
+    },
+    []
+  )
+
   const addLog = useCallback((message: string) => {
     const at = formatTime()
     const id = Date.now()
@@ -258,17 +498,17 @@ function App() {
   }, [debugOpen, addLog])
 
   const findColumnByCardId = useCallback(
-    (cardId: string) => columns.find((c) => c.cardIds.includes(cardId)),
-    [columns]
+    (cardId: string) => columnsForDisplay.find((c) => c.cardIds.includes(cardId)),
+    [columnsForDisplay]
   )
   const findColumnById = useCallback(
-    (id: string) => columns.find((c) => c.id === id),
-    [columns]
+    (id: string) => columnsForDisplay.find((c) => c.id === id),
+    [columnsForDisplay]
   )
 
   const isColumnId = useCallback(
-    (id: UniqueIdentifier) => columns.some((c) => c.id === id),
-    [columns]
+    (id: UniqueIdentifier) => columnsForDisplay.some((c) => c.id === id),
+    [columnsForDisplay]
   )
 
   const collisionDetection: CollisionDetection = useCallback(
@@ -325,11 +565,13 @@ function App() {
 
   const handleRemoveColumn = useCallback(
     (id: string) => {
-      const col = columns.find((c) => c.id === id)
-      setColumns((prev) => prev.filter((c) => c.id !== id))
+      const cols = ticketStoreConnected ? ticketColumns : columns
+      const setCols = ticketStoreConnected ? setTicketColumns : setColumns
+      const col = cols.find((c) => c.id === id)
+      setCols((prev) => prev.filter((c) => c.id !== id))
       if (col) addLog(`Column removed: "${col.title}"`)
     },
-    [columns, addLog]
+    [ticketStoreConnected, ticketColumns, columns, addLog]
   )
 
   const handleDragStart = useCallback(
@@ -345,88 +587,144 @@ function App() {
   }, [])
 
   const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
+    async (event: DragEndEvent) => {
       setActiveCardId(null)
       const { active, over } = event
-      // Use last known over from collision detection when over is null on drop
       const effectiveOverId = over?.id ?? lastOverId.current
       if (effectiveOverId == null) return
 
       if (isColumnId(active.id)) {
-        const oldIndex = columns.findIndex((c) => c.id === active.id)
-        const newIndex = columns.findIndex((c) => c.id === effectiveOverId)
+        const cols = ticketStoreConnected ? ticketColumns : columns
+        const setCols = ticketStoreConnected ? setTicketColumns : setColumns
+        const oldIndex = cols.findIndex((c) => c.id === active.id)
+        const newIndex = cols.findIndex((c) => c.id === effectiveOverId)
         if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
-        const next = arrayMove(columns, oldIndex, newIndex)
-        setColumns(next)
-        const oldOrder = columns.map((c) => c.title)
-        const newOrder = next.map((c) => c.title)
-        addLog(`Columns reordered: ${oldOrder.join(',')} -> ${newOrder.join(',')}`)
+        const next = arrayMove(cols, oldIndex, newIndex)
+        setCols(next)
+        addLog(`Columns reordered: ${cols.map((c) => c.title).join(',')} -> ${next.map((c) => c.title).join(',')}`)
         return
       }
 
       const sourceColumn = findColumnByCardId(String(active.id))
-      if (!sourceColumn) return
+      const overColumn = findColumnById(String(effectiveOverId)) ?? findColumnByCardId(String(effectiveOverId))
 
-      const overId = effectiveOverId
-      // overId can be column id (droppable) or card id (dropped on a card)
-      const overColumn = findColumnById(String(overId)) ?? findColumnByCardId(String(overId))
-      if (!overColumn) return
+      if (!sourceColumn && ticketStoreConnected && ticketStoreRootHandle && overColumn && ticketStoreFiles.some((f) => f.path === active.id)) {
+        const path = String(active.id)
+        let overIndex = overColumn.cardIds.indexOf(String(effectiveOverId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
+        const prev = ticketColumns.map((c) => ({ ...c, cardIds: [...c.cardIds] }))
+        setTicketColumns((prevCols) =>
+          prevCols.map((col) =>
+            col.id === overColumn.id
+              ? { ...col, cardIds: [...col.cardIds.slice(0, overIndex), path, ...col.cardIds.slice(overIndex)] }
+              : col
+          )
+        )
+        try {
+          await writeTicketKanbanFrontmatter(ticketStoreRootHandle, path, {
+            kanbanColumnId: overColumn.id,
+            kanbanPosition: overIndex,
+            kanbanMovedAt: new Date().toISOString(),
+          })
+          setLastSavedTicketPath(path)
+          setLastSavedAt(new Date())
+          setLastWriteError(null)
+          addLog(`Ticket dropped into ${overColumn.title}: ${path}`)
+        } catch (e) {
+          setLastWriteError(e instanceof Error ? e.message : 'Write failed')
+          setTicketColumns(prev)
+          addLog(`Write failed for ${path}`)
+        }
+        return
+      }
+
+      if (!sourceColumn || !overColumn) return
 
       const sourceCardIds = sourceColumn.cardIds
       const activeIndex = sourceCardIds.indexOf(String(active.id))
       const isSameColumn = sourceColumn.id === overColumn.id
+      const cols = ticketStoreConnected ? ticketColumns : columns
+      const setCols = ticketStoreConnected ? setTicketColumns : setColumns
+      const cardsMap = cardsForDisplay
 
       if (isSameColumn) {
-        let overIndex = overColumn.cardIds.indexOf(String(overId))
+        let overIndex = overColumn.cardIds.indexOf(String(effectiveOverId))
         if (overIndex < 0) overIndex = overColumn.cardIds.length
         if (activeIndex === overIndex) return
-        setColumns((prev) =>
-          prev.map((c) =>
-            c.id === sourceColumn.id
-              ? { ...c, cardIds: arrayMove(c.cardIds, activeIndex, overIndex) }
-              : c
-          )
+        const nextCols = cols.map((c) =>
+          c.id === sourceColumn.id
+            ? { ...c, cardIds: arrayMove(c.cardIds, activeIndex, overIndex) }
+            : c
         )
-        const card = cards[String(active.id)]
-        const colTitle = sourceColumn.title
-        const oldOrder = sourceCardIds.map((id) => cards[id]?.title ?? id).join(',')
-        const newOrder = arrayMove(sourceCardIds, activeIndex, overIndex).map(
-          (id) => cards[id]?.title ?? id
-        ).join(',')
-        addLog(`Card reordered in ${colTitle}: ${oldOrder} -> ${newOrder} (card: ${card?.title ?? active.id})`)
-      } else {
-        let overIndex = overColumn.cardIds.indexOf(String(overId))
-        if (overIndex < 0) overIndex = overColumn.cardIds.length
-        setColumns((prev) =>
-          prev.map((c) => {
-            if (c.id === sourceColumn.id) {
-              return { ...c, cardIds: c.cardIds.filter((id) => id !== active.id) }
-            }
-            if (c.id === overColumn.id) {
-              const without = c.cardIds.filter((id) => id !== active.id)
-              return {
-                ...c,
-                cardIds: [...without.slice(0, overIndex), String(active.id), ...without.slice(overIndex)],
+        setCols(nextCols)
+        addLog(`Card reordered in ${sourceColumn.title} (card: ${cardsMap[String(active.id)]?.title ?? active.id})`)
+        if (ticketStoreConnected && ticketStoreRootHandle) {
+          const col = nextCols.find((c) => c.id === sourceColumn.id)
+          if (col) {
+            try {
+              for (let i = 0; i < col.cardIds.length; i++) {
+                const p = col.cardIds[i]
+                if (!p.startsWith('docs/')) continue
+                await writeTicketKanbanFrontmatter(ticketStoreRootHandle, p, {
+                  kanbanColumnId: col.id,
+                  kanbanPosition: i,
+                  ...(p === active.id ? { kanbanMovedAt: new Date().toISOString() } : {}),
+                })
               }
+              setLastSavedTicketPath(String(active.id))
+              setLastSavedAt(new Date())
+              setLastWriteError(null)
+            } catch (e) {
+              setLastWriteError(e instanceof Error ? e.message : 'Write failed')
             }
-            return c
-          })
-        )
-        const card = cards[String(active.id)]
-        const fromTitle = sourceColumn.title
-        const toTitle = overColumn.title
-        const fromBefore = sourceCardIds.map((id) => cards[id]?.title ?? id).join(',')
-        const fromAfter = sourceCardIds.filter((id) => id !== active.id).map((id) => cards[id]?.title ?? id).join(',')
-        const toBefore = overColumn.cardIds.map((id) => cards[id]?.title ?? id).join(',')
-        const toAfter = [...overColumn.cardIds.slice(0, overIndex), String(active.id), ...overColumn.cardIds.slice(overIndex)]
-          .map((id) => cards[id]?.title ?? id)
-          .join(',')
-        addLog(
-          `Card moved from ${fromTitle} [${fromBefore}] to ${toTitle} [${toBefore}]; after: ${fromTitle} [${fromAfter}], ${toTitle} [${toAfter}] (${card?.title ?? active.id})`
-        )
+          }
+        }
+      } else {
+        let overIndex = overColumn.cardIds.indexOf(String(effectiveOverId))
+        if (overIndex < 0) overIndex = overColumn.cardIds.length
+        const nextCols = cols.map((c) => {
+          if (c.id === sourceColumn.id) return { ...c, cardIds: c.cardIds.filter((id) => id !== active.id) }
+          if (c.id === overColumn.id) {
+            const without = c.cardIds.filter((id) => id !== active.id)
+            return { ...c, cardIds: [...without.slice(0, overIndex), String(active.id), ...without.slice(overIndex)] }
+          }
+          return c
+        })
+        setCols(nextCols)
+        addLog(`Card moved from ${sourceColumn.title} to ${overColumn.title} (${cardsMap[String(active.id)]?.title ?? active.id})`)
+        if (ticketStoreConnected && ticketStoreRootHandle) {
+          const path = String(active.id)
+          if (path.startsWith('docs/')) {
+            try {
+              await writeTicketKanbanFrontmatter(ticketStoreRootHandle, path, {
+                kanbanColumnId: overColumn.id,
+                kanbanPosition: overIndex,
+                kanbanMovedAt: new Date().toISOString(),
+              })
+              setLastSavedTicketPath(path)
+              setLastSavedAt(new Date())
+              setLastWriteError(null)
+            } catch (e) {
+              setLastWriteError(e instanceof Error ? e.message : 'Write failed')
+              setCols(cols)
+            }
+          }
+        }
       }
     },
-    [columns, cards, findColumnByCardId, findColumnById, isColumnId, addLog]
+    [
+      ticketStoreConnected,
+      ticketStoreRootHandle,
+      ticketStoreFiles,
+      ticketColumns,
+      columns,
+      findColumnByCardId,
+      findColumnById,
+      isColumnId,
+      addLog,
+      writeTicketKanbanFrontmatter,
+      cardsForDisplay,
+    ]
   )
 
   const sensors = useSensors(
@@ -435,13 +733,13 @@ function App() {
   )
 
   const columnOrderDisplay =
-    columns.length === 0 ? '(none)' : columns.map((c) => c.title).join(' → ')
+    columnsForDisplay.length === 0 ? '(none)' : columnsForDisplay.map((c) => c.title).join(' → ')
 
   const kanbanCardsDisplay =
-    columns.length === 0
+    columnsForDisplay.length === 0
       ? '(none)'
-      : columns
-          .map((c) => `${c.title}: ${c.cardIds.map((id) => cards[id]?.title ?? id).join(',')}`)
+      : columnsForDisplay
+          .map((c) => `${c.title}: ${c.cardIds.map((id) => cardsForDisplay[id]?.title ?? id).join(',')}`)
           .join(' | ')
 
   return (
@@ -449,146 +747,278 @@ function App() {
       <h1>Portfolio 2026</h1>
       <p className="subtitle">Project Zero: Kanban (coming soon)</p>
 
-      <section className="columns-section" aria-label="Columns">
-        <h2>Columns</h2>
-        <button
-          type="button"
-          className="add-column-btn"
-          onClick={() => {
-            setAddColumnError(null)
-            setShowAddColumnForm(true)
-          }}
-          aria-expanded={showAddColumnForm}
-        >
-          Add column
-        </button>
-        {showAddColumnForm && (
-          <div className="add-column-form" role="form" aria-label="Add column form">
-            <input
-              type="text"
-              value={newColumnTitle}
-              onChange={(e) => {
-                setNewColumnTitle(e.target.value)
-                setAddColumnError(null)
-              }}
-              placeholder="Column name"
-              autoFocus
-              aria-label="Column name"
-              aria-invalid={!!addColumnError}
-              aria-describedby={addColumnError ? 'add-column-error' : undefined}
-            />
-            {addColumnError && (
-              <p id="add-column-error" className="add-column-error" role="alert">
-                {addColumnError}
-              </p>
-            )}
-            <div className="form-actions">
-              <button type="button" onClick={handleCreateColumn}>
-                Create
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <section className="columns-section" aria-label="Columns">
+          <h2>Columns</h2>
+          {!ticketStoreConnected && (
+            <>
+              <button
+                type="button"
+                className="add-column-btn"
+                onClick={() => {
+                  setAddColumnError(null)
+                  setShowAddColumnForm(true)
+                }}
+                aria-expanded={showAddColumnForm}
+              >
+                Add column
               </button>
-              <button type="button" onClick={handleCancelAddColumn}>
-                Cancel
-              </button>
+              {showAddColumnForm && (
+            <div className="add-column-form" role="form" aria-label="Add column form">
+              <input
+                type="text"
+                value={newColumnTitle}
+                onChange={(e) => {
+                  setNewColumnTitle(e.target.value)
+                  setAddColumnError(null)
+                }}
+                placeholder="Column name"
+                autoFocus
+                aria-label="Column name"
+                aria-invalid={!!addColumnError}
+                aria-describedby={addColumnError ? 'add-column-error' : undefined}
+              />
+              {addColumnError && (
+                <p id="add-column-error" className="add-column-error" role="alert">
+                  {addColumnError}
+                </p>
+              )}
+              <div className="form-actions">
+                <button type="button" onClick={handleCreateColumn}>
+                  Create
+                </button>
+                <button type="button" onClick={handleCancelAddColumn}>
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetection}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
+              )}
+            </>
+          )}
           <SortableContext
-            items={columns.map((c) => c.id)}
+            items={columnsForDisplay.map((c) => c.id)}
             strategy={horizontalListSortingStrategy}
           >
             <div className="columns-row">
-              {columns.map((col) => (
+              {columnsForDisplay.map((col) => (
                 <SortableColumn
                   key={col.id}
                   col={col}
-                  cards={cards}
+                  cards={cardsForDisplay}
                   onRemove={handleRemoveColumn}
+                  hideRemove={ticketStoreConnected}
                 />
               ))}
             </div>
           </SortableContext>
-          <DragOverlay>
-            {activeCardId && cards[String(activeCardId)] ? (
-              <div className="ticket-card" data-card-id={activeCardId}>
-                {cards[String(activeCardId)].title}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </section>
+        </section>
 
-      <section className="tickets-docs-section" aria-label="Tickets (Docs)">
-        <h2>Tickets (Docs)</h2>
-        <p className="tickets-status" data-status={ticketStoreConnected ? 'connected' : 'disconnected'}>
-          {ticketStoreConnected ? 'Connected' : 'Disconnected'}
-        </p>
-        {!ticketStoreConnected ? (
+        <section className="tickets-docs-section" aria-label="Ticket Store">
+        <h2>Ticket Store</h2>
+        <div className="ticket-store-mode" role="tablist" aria-label="Ticket store mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={ticketStoreMode === 'docs'}
+            onClick={() => setTicketStoreMode('docs')}
+            className={ticketStoreMode === 'docs' ? 'mode-tab active' : 'mode-tab'}
+          >
+            Docs
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={ticketStoreMode === 'supabase'}
+            onClick={() => setTicketStoreMode('supabase')}
+            className={ticketStoreMode === 'supabase' ? 'mode-tab active' : 'mode-tab'}
+          >
+            Supabase
+          </button>
+        </div>
+
+        {ticketStoreMode === 'docs' && (
           <>
-            <p className="tickets-explanation">
-              Connect a project folder to read ticket files from <code>docs/tickets/*.md</code> (read-only).
+            <p className="tickets-status" data-status={ticketStoreConnected ? 'connected' : 'disconnected'}>
+              {ticketStoreConnected ? 'Connected' : 'Disconnected'}
             </p>
-            <button type="button" className="connect-project-btn" onClick={handleConnectProject}>
-              Connect project
-            </button>
-            {ticketStoreConnectMessage && (
-              <p className="tickets-message" role="alert">
-                {ticketStoreConnectMessage}
-              </p>
-            )}
-          </>
-        ) : (
-          <>
-            {ticketStoreLastError && (
-              <p className="tickets-message tickets-error" role="alert">
-                {ticketStoreLastError}
-              </p>
-            )}
-            <p className="tickets-count">Found {ticketStoreFiles.length} tickets.</p>
-            <button type="button" className="refresh-tickets-btn" onClick={handleRefreshTickets}>
-              Refresh
-            </button>
-            <div className="tickets-layout">
-              <ul className="tickets-list" aria-label="Ticket files">
-                {ticketStoreFiles.map((f) => (
-                  <li key={f.path}>
-                    <button
-                      type="button"
-                      className="ticket-file-btn"
-                      onClick={() => handleSelectTicket(f.path, f.name)}
-                      aria-pressed={selectedTicketPath === f.path}
-                    >
-                      {f.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className="ticket-viewer" aria-label="Ticket viewer">
-                {selectedTicketPath ? (
-                  <>
-                    <p className="ticket-viewer-path">
-                      <strong>Path:</strong> {selectedTicketPath}
-                    </p>
-                    {ticketViewerLoading ? (
-                      <p className="ticket-viewer-loading">Loading…</p>
-                    ) : (
-                      <pre className="ticket-viewer-content">{selectedTicketContent ?? ''}</pre>
-                    )}
-                  </>
-                ) : (
-                  <p className="ticket-viewer-placeholder">Click a ticket file to view its contents.</p>
+            {!ticketStoreConnected ? (
+              <>
+                <p className="tickets-explanation">
+                  Connect a project folder to read and write ticket files from <code>docs/tickets/*.md</code> (drag tickets into columns to save frontmatter).
+                </p>
+                <button type="button" className="connect-project-btn" onClick={handleConnectProject}>
+                  Connect project
+                </button>
+                {ticketStoreConnectMessage && (
+                  <p className="tickets-message" role="alert">
+                    {ticketStoreConnectMessage}
+                  </p>
                 )}
-              </div>
-            </div>
+              </>
+            ) : (
+              <>
+                {ticketStoreLastError && (
+                  <p className="tickets-message tickets-error" role="alert">
+                    {ticketStoreLastError}
+                  </p>
+                )}
+                <p className="tickets-count">Found {ticketStoreFiles.length} tickets. Drag into a column to save.</p>
+                {lastWriteError && (
+                  <p className="tickets-message tickets-error" role="alert">
+                    Write error: {lastWriteError}
+                  </p>
+                )}
+                {lastSavedTicketPath && (
+                  <p className="tickets-saved" role="status">
+                    Saved to file: {lastSavedTicketPath}
+                  </p>
+                )}
+                <button type="button" className="refresh-tickets-btn" onClick={handleRefreshTickets}>
+                  Refresh
+                </button>
+                <div className="tickets-layout">
+                  <ul className="tickets-list" aria-label="Ticket files">
+                    {ticketStoreFiles.map((f) => (
+                      <DraggableTicketItem
+                        key={f.path}
+                        path={f.path}
+                        name={f.name}
+                        onClick={() => handleSelectTicket(f.path, f.name)}
+                        isSelected={selectedTicketPath === f.path}
+                      />
+                    ))}
+                  </ul>
+                  <div className="ticket-viewer" aria-label="Ticket viewer">
+                    {selectedTicketPath ? (
+                      <>
+                        <p className="ticket-viewer-path">
+                          <strong>Path:</strong> {selectedTicketPath}
+                        </p>
+                        {ticketViewerLoading ? (
+                          <p className="ticket-viewer-loading">Loading…</p>
+                        ) : (
+                          <pre className="ticket-viewer-content">{selectedTicketContent ?? ''}</pre>
+                        )}
+                      </>
+                    ) : (
+                      <p className="ticket-viewer-placeholder">Click a ticket file to view its contents.</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
-      </section>
+
+        {ticketStoreMode === 'supabase' && (
+          <>
+            <h3>Supabase Config</h3>
+            <p className="tickets-status" data-status={supabaseConnectionStatus}>
+              {supabaseConnectionStatus === 'connecting'
+                ? 'Connecting'
+                : supabaseConnectionStatus === 'connected'
+                  ? 'Connected'
+                  : 'Disconnected'}
+            </p>
+            {localStorage.getItem(SUPABASE_CONFIG_KEY) && (
+              <p className="tickets-saved" role="status">Saved locally</p>
+            )}
+            <div className="supabase-config">
+              <label>
+                Project URL
+                <input
+                  type="url"
+                  value={supabaseProjectUrl}
+                  onChange={(e) => setSupabaseProjectUrl(e.target.value)}
+                  placeholder="https://xxx.supabase.co"
+                  aria-label="Supabase project URL"
+                />
+              </label>
+              <label>
+                Anon key
+                <input
+                  type="password"
+                  value={supabaseAnonKey}
+                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                  placeholder="eyJ..."
+                  aria-label="Supabase anon key"
+                />
+              </label>
+              <button
+                type="button"
+                className="connect-project-btn"
+                onClick={handleSupabaseConnect}
+                disabled={supabaseConnectionStatus === 'connecting'}
+              >
+                Connect
+              </button>
+            </div>
+            <p className="tickets-message" role="alert">
+              Last error: {supabaseLastError ?? 'none'}
+            </p>
+
+            {supabaseNotInitialized && (
+              <div className="supabase-setup" role="region" aria-label="Setup instructions">
+                <p className="tickets-message tickets-error" role="alert">
+                  Supabase not initialized
+                </p>
+                <h4>Setup instructions</h4>
+                <p>Run the following SQL in the Supabase SQL Editor to create the <code>tickets</code> table:</p>
+                <pre className="supabase-setup-sql">{SUPABASE_SETUP_SQL}</pre>
+              </div>
+            )}
+
+            {supabaseConnectionStatus === 'connected' && (
+              <>
+                <p className="tickets-count">Found {supabaseTickets.length} tickets.</p>
+                <div className="tickets-layout">
+                  <ul className="tickets-list" aria-label="Supabase tickets">
+                    {supabaseTickets.map((row) => (
+                      <li key={row.id}>
+                        <button
+                          type="button"
+                          className="ticket-file-btn"
+                          onClick={() => handleSelectSupabaseTicket(row)}
+                          aria-pressed={selectedSupabaseTicketId === row.id}
+                        >
+                          {row.title} ({row.id})
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="ticket-viewer" aria-label="Ticket viewer">
+                    {selectedSupabaseTicketId ? (
+                      <>
+                        <p className="ticket-viewer-path">
+                          <strong>ID:</strong> {selectedSupabaseTicketId}
+                        </p>
+                        <pre className="ticket-viewer-content">{selectedSupabaseTicketContent ?? ''}</pre>
+                      </>
+                    ) : (
+                      <p className="ticket-viewer-placeholder">Click a ticket to view its contents.</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+        </section>
+
+        <DragOverlay>
+          {activeCardId && cardsForDisplay[String(activeCardId)] ? (
+            <div className="ticket-card" data-card-id={activeCardId}>
+              {cardsForDisplay[String(activeCardId)].title}
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <button type="button" className="debug-toggle" onClick={toggleDebug} aria-pressed={debugOpen}>
         Debug {debugOpen ? 'ON' : 'OFF'}
@@ -605,7 +1035,7 @@ function App() {
           <section>
             <h3>Kanban state</h3>
             <div className="build-info">
-              <p className="kanban-summary">Column count: {columns.length}</p>
+              <p className="kanban-summary">Column count: {columnsForDisplay.length}</p>
               <p className="kanban-column-order">
                 Column order: {columnOrderDisplay}
               </p>
@@ -617,12 +1047,33 @@ function App() {
           <section>
             <h3>Ticket Store</h3>
             <div className="build-info">
-              <p>Store: Docs (read-only)</p>
+              <p>Store: Docs (read + write when connected with readwrite)</p>
               <p>Connected: {String(ticketStoreConnected)}</p>
               <p>Last refresh: {ticketStoreLastRefresh ? ticketStoreLastRefresh.toISOString() : 'never'}</p>
               <p>Last error: {ticketStoreLastError ?? 'none'}</p>
+              <p>Last write error: {lastWriteError ?? 'none'}</p>
+              <p>Last saved: {lastSavedTicketPath ? `${lastSavedTicketPath} at ${lastSavedAt?.toISOString() ?? ''}` : 'none'}</p>
             </div>
           </section>
+          {selectedTicketPath && (
+            <section>
+              <h3>Selected ticket frontmatter</h3>
+              <div className="build-info">
+                <p>Path: {selectedTicketPath}</p>
+                {selectedTicketContent != null && !selectedTicketContent.startsWith('(') && (() => {
+                  const { frontmatter } = parseFrontmatter(selectedTicketContent)
+                  const kanban = getKanbanFromFrontmatter(frontmatter)
+                  return (
+                    <>
+                      <p>kanbanColumnId: {kanban.kanbanColumnId ?? '(not set)'}</p>
+                      <p>kanbanPosition: {kanban.kanbanPosition ?? '(not set)'}</p>
+                      <p>kanbanMovedAt: {kanban.kanbanMovedAt ?? '(not set)'}</p>
+                    </>
+                  )
+                })()}
+              </div>
+            </section>
+          )}
           <section>
             <h3>Action Log</h3>
             <p className="action-log-summary">Total actions: {actionLog.length}</p>
