@@ -1,7 +1,30 @@
 import { useState, useCallback } from 'react'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 type LogEntry = { id: number; message: string; at: string }
 type Column = { id: string; title: string }
+
+const DUMMY_CARDS = [
+  { id: 'd1', title: 'Dummy task A' },
+  { id: 'd2', title: 'Dummy task B' },
+  { id: 'd3', title: 'Dummy task C' },
+]
 
 function formatTime(): string {
   const d = new Date()
@@ -12,6 +35,51 @@ function stableColumnId(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `col-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function SortableColumn({
+  col,
+  onRemove,
+}: {
+  col: Column
+  onRemove: (id: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: col.id,
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="column-card"
+      data-column-id={col.id}
+    >
+      <div className="column-header">
+        <span className="column-title" {...attributes} {...listeners}>
+          {col.title}
+        </span>
+        <button
+          type="button"
+          className="column-remove"
+          onClick={() => onRemove(col.id)}
+          aria-label={`Remove column ${col.title}`}
+        >
+          Remove
+        </button>
+      </div>
+      <div className="column-cards">
+        {DUMMY_CARDS.map((card) => (
+          <div key={card.id} className="ticket-card">
+            {card.title}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function App() {
@@ -58,6 +126,30 @@ function App() {
     [columns, addLog]
   )
 
+  const handleColumnDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      const oldOrder = columns.map((c) => c.title)
+      const oldIndex = columns.findIndex((c) => c.id === active.id)
+      const newIndex = columns.findIndex((c) => c.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return
+      const next = arrayMove(columns, oldIndex, newIndex)
+      setColumns(next)
+      const newOrder = next.map((c) => c.title)
+      addLog(`Columns reordered: ${oldOrder.join(',')} -> ${newOrder.join(',')}`)
+    },
+    [columns, addLog]
+  )
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const columnOrderDisplay =
+    columns.length === 0 ? '(none)' : columns.map((c) => c.title).join(' → ')
+
   return (
     <>
       <h1>Portfolio 2026</h1>
@@ -93,21 +185,26 @@ function App() {
             </div>
           </div>
         )}
-        <div className="columns-row">
-          {columns.map((col) => (
-            <div key={col.id} className="column-card" data-column-id={col.id}>
-              <span className="column-title">{col.title}</span>
-              <button
-                type="button"
-                className="column-remove"
-                onClick={() => handleRemoveColumn(col.id)}
-                aria-label={`Remove column ${col.title}`}
-              >
-                Remove
-              </button>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleColumnDragEnd}
+        >
+          <SortableContext
+            items={columns.map((c) => c.id)}
+            strategy={horizontalListSortingStrategy}
+          >
+            <div className="columns-row">
+              {columns.map((col) => (
+                <SortableColumn
+                  key={col.id}
+                  col={col}
+                  onRemove={handleRemoveColumn}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       </section>
 
       <button type="button" className="debug-toggle" onClick={toggleDebug} aria-pressed={debugOpen}>
@@ -126,6 +223,9 @@ function App() {
             <h3>Kanban state</h3>
             <div className="build-info">
               <p className="kanban-summary">Column count: {columns.length}</p>
+              <p className="kanban-column-order">
+                Column order: {columnOrderDisplay}
+              </p>
               <p className="kanban-column-names">
                 Column names: {columns.length === 0 ? '(none)' : columns.map((c) => c.title).join(', ')}
               </p>
