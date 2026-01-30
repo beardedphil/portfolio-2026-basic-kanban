@@ -32,7 +32,7 @@ import {
   updateKanbanInContent,
   type KanbanFrontmatter,
 } from './frontmatter'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js'
 
 type LogEntry = { id: number; message: string; at: string }
 type Card = { id: string; title: string }
@@ -418,14 +418,21 @@ function App() {
     try {
       const client = createClient(url, key)
       // Test query: verify table exists and is readable
-      const { data: testData, error: testError } = await client
+      const { error: testError } = await client
         .from('tickets')
         .select('id')
         .limit(1)
       if (testError) {
         const code = (testError as { code?: string }).code
         const msg = testError.message ?? String(testError)
-        if (code === '42P01' || msg.toLowerCase().includes('relation') || msg.toLowerCase().includes('does not exist')) {
+        const lower = msg.toLowerCase()
+        const isTableMissing =
+          code === '42P01' ||
+          lower.includes('relation') ||
+          lower.includes('does not exist') ||
+          lower.includes('schema cache') ||
+          lower.includes('could not find the table')
+        if (isTableMissing) {
           setSupabaseNotInitialized(true)
           setSupabaseLastError('Supabase not initialized (tickets table missing).')
         } else {
@@ -1053,6 +1060,15 @@ function App() {
               <p>Last error: {ticketStoreLastError ?? 'none'}</p>
               <p>Last write error: {lastWriteError ?? 'none'}</p>
               <p>Last saved: {lastSavedTicketPath ? `${lastSavedTicketPath} at ${lastSavedAt?.toISOString() ?? ''}` : 'none'}</p>
+            </div>
+          </section>
+          <section>
+            <h3>Ticket Store (Supabase)</h3>
+            <div className="build-info">
+              <p>Connected: {String(supabaseConnectionStatus === 'connected')}</p>
+              <p>Project URL present: {String(!!supabaseProjectUrl.trim())}</p>
+              <p>Last refresh time: {supabaseLastRefresh ? supabaseLastRefresh.toISOString() : 'never'}</p>
+              <p>Last error: {supabaseLastError ?? 'none'}</p>
             </div>
           </section>
           {selectedTicketPath && (
