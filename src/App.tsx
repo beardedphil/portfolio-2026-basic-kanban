@@ -19,12 +19,10 @@ function App() {
   }, [])
 
   const toggleDebug = useCallback(() => {
-    setDebugOpen((prev) => {
-      const next = !prev
-      addLog(next ? 'Debug toggled ON' : 'Debug toggled OFF')
-      return next
-    })
-  }, [addLog])
+    const next = !debugOpen
+    setDebugOpen(next)
+    addLog(next ? 'Debug toggled ON' : 'Debug toggled OFF')
+  }, [debugOpen, addLog])
 
   return (
     <>
@@ -45,6 +43,7 @@ function App() {
           </section>
           <section>
             <h3>Action Log</h3>
+            <p className="action-log-summary">Total actions: {actionLog.length}</p>
             <ul>
               {actionLog.length === 0 ? (
                 <li>No actions yet.</li>
