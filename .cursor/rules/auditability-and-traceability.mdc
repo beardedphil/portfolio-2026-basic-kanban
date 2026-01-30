@@ -48,6 +48,8 @@ Create a task folder under `docs/audit/`:
   - the agent must paste the output of `git status -sb` into the worklog
 - The ticket file itself must be **committed to the repo**:
   - `docs/tickets/<task-id>-<short-title>.md` must exist on the branch being verified.
+ 
+Note: Workspace-wide, the definition of “done” for **all agents** is enforced by `.cursor/rules/done-means-pushed.mdc`.
 
 ## In-App Trace Requirement
 

@@ -1,0 +1,16 @@
+---
+description: "Done" requires commit + push (all agents)
+alwaysApply: true
+---
+
+# “Done” Means Committed + Pushed (All Agents)
+
+- If any agent believes a task/story is **done**, they must:
+  - **commit** all relevant changes, and
+  - **push** to the remote
+  before telling the user or project manager that it’s done.
+
+## PM verification
+
+- The project manager’s “done” is only **candidate-complete** until the user verifies the acceptance criteria.
+- Do not use language like “done” or “complete” until changes are committed and pushed.
