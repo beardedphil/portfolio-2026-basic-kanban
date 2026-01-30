@@ -9,6 +9,8 @@ alwaysApply: true
   - **commit** all relevant changes, and
   - **push** to the remote
   before telling the user or project manager that it’s done.
+- Agents must not delegate commit/push work to the user/PM (e.g., “after you commit and push…”).
+  - If commit/push hasn’t happened yet, the correct status is **“not ready for verification.”**
 
 ## PM verification
 

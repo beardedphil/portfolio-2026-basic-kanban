@@ -21,6 +21,9 @@ We will expand these rules as we learn.
 - **UI-only verification steps**:
   - `verification.md` must be written so a non-technical human can follow it
   - no devtools / console / logs required for verification
+- **No “handoff chores”**:
+  - a ticket cannot be considered “ready for verification” if the agent tells the user/PM to perform git steps (commit/push) or to update audit artifacts
+  - the only allowed prerequisites are “open the app” (and, if unavoidable, starting the dev server)
 - **Acceptance criteria satisfied**:
   - each checkbox in the ticket maps to one or more explicit steps in `verification.md`
   - verification includes clear **pass/fail observations**
