@@ -26,5 +26,5 @@
 - Created docs/audit/0009-docs-ticketstore-readonly-viewer/ with plan.md, worklog.md, changed-files.md, decisions.md, verification.md.
 
 ## Commit and push
-- Commit: _(to be filled after commit)_
-- `git status -sb` (pre-commit): `## main...origin/main` with ` M src/App.tsx`, ` M src/index.css`, ` M src/vite-env.d.ts`, `?? docs/audit/0009-docs-ticketstore-readonly-viewer/`
+- Commit: `dac7e07`
+- `git status -sb` (after push): `## main...origin/main`
