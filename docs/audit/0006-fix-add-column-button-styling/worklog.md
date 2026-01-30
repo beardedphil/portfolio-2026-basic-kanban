@@ -12,5 +12,5 @@
 - Confirmed Add column button renders as one dark button; no DOM changes in App.tsx. Other buttons (Debug toggle, Create, Cancel, Remove) unchanged.
 
 ## Commit and push
-- After committing: add commit hash(es) here.
-- `git status -sb` (before commit): `## main...origin/main` with ` M src/index.css`.
+- Commit: `3f96a69`
+- `git status -sb` (after push): `## main...origin/main`
