@@ -95,6 +95,8 @@ type SyncPreviewResult = {
 const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
 /** Polling interval when Supabase board is active (0013); 10s */
 const SUPABASE_POLL_INTERVAL_MS = 10_000
+/** Project dropdown options (0014); UI-only for now */
+const PROJECT_OPTIONS = [{ id: 'hal-kanban', label: 'hal-kanban' }] as const
 const _SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   id text primary key,
   filename text not null,
@@ -442,9 +444,10 @@ function App() {
   const [ticketStoreFiles, setTicketStoreFiles] = useState<TicketFile[]>([])
   const [ticketStoreLastRefresh, setTicketStoreLastRefresh] = useState<Date | null>(null)
   const [ticketStoreLastError, setTicketStoreLastError] = useState<string | null>(null)
+  const [_ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
   const [selectedTicketPath, setSelectedTicketPath] = useState<string | null>(null)
   const [selectedTicketContent, setSelectedTicketContent] = useState<string | null>(null)
-  const [ticketViewerLoading, setTicketViewerLoading] = useState(false)
+  const [_ticketViewerLoading, setTicketViewerLoading] = useState(false)
   // Kanban-from-docs state (used when connected)
   const [ticketColumns, setTicketColumns] = useState<Column[]>(() => EMPTY_KANBAN_COLUMNS)
   const [ticketCards, setTicketCards] = useState<Record<string, Card>>({})
@@ -452,9 +455,10 @@ function App() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [lastWriteError, setLastWriteError] = useState<string | null>(null)
 
-  // Ticket Store mode: Docs (folder) vs Supabase
-  const [ticketStoreMode, setTicketStoreMode] = useState<'docs' | 'supabase'>('docs')
-  const [ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
+  // Ticket Store mode: Docs (folder) vs Supabase; main UI uses Supabase only (0014)
+  const [ticketStoreMode, _setTicketStoreMode] = useState<'docs' | 'supabase'>('supabase')
+  // Project selector (0014); single option for now
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(PROJECT_OPTIONS[0].id)
 
   // New HAL project wizard (v0 checklist-only)
   const [newHalWizardOpen, setNewHalWizardOpen] = useState(false)
@@ -668,7 +672,7 @@ function App() {
     }
   }, [])
 
-  const handleConnectProject = useCallback(async () => {
+  const _handleConnectProject = useCallback(async () => {
     setTicketStoreConnectMessage(null)
     if (typeof window.showDirectoryPicker !== 'function') {
       setTicketStoreLastError('Folder picker not supported in this browser.')
@@ -689,7 +693,7 @@ function App() {
     }
   }, [refreshTicketStore])
 
-  const handleSelectTicket = useCallback(
+  const _handleSelectTicket = useCallback(
     async (path: string, name: string) => {
       const root = ticketStoreRootHandle
       if (!root) return
@@ -712,16 +716,16 @@ function App() {
     [ticketStoreRootHandle]
   )
 
-  const handleRefreshTickets = useCallback(async () => {
+  const _handleRefreshTickets = useCallback(async () => {
     const root = ticketStoreRootHandle
     if (root) await refreshTicketStore(root)
   }, [ticketStoreRootHandle, refreshTicketStore])
 
-  const handleSupabaseConnect = useCallback(() => {
+  const _handleSupabaseConnect = useCallback(() => {
     connectSupabase(supabaseProjectUrl.trim(), supabaseAnonKey.trim())
   }, [supabaseProjectUrl, supabaseAnonKey, connectSupabase])
 
-  const handleSelectSupabaseTicket = useCallback((row: SupabaseTicketRow) => {
+  const _handleSelectSupabaseTicket = useCallback((row: SupabaseTicketRow) => {
     setSelectedSupabaseTicketId(row.id)
     setSelectedSupabaseTicketContent(row.body_md ?? '')
   }, [])
@@ -1394,12 +1398,14 @@ function App() {
   const supabaseConfigMissing = !envUrl || !envKey
   const showConfigMissingError = supabaseConfigMissing && supabaseConnectionStatus !== 'connected'
 
-  // Retain for possible Debug-only features; satisfy noUnusedLocals
+  // Retain for possible Debug-only Ticket Store (0014); satisfy noUnusedLocals
   const _retain = [
     _SUPABASE_SETUP_SQL,
     _DraggableTicketItem,
     _DraggableSupabaseTicketItem,
-    ticketViewerLoading,
+    _ticketStoreConnectMessage,
+    _ticketViewerLoading,
+    _setTicketStoreMode,
     _supabaseNotInitialized,
     _selectedSupabaseTicketId,
     _selectedSupabaseTicketContent,
@@ -1407,8 +1413,11 @@ function App() {
     _syncInProgress,
     _syncSummary,
     _syncProgressText,
-    handleSelectTicket,
-    handleSelectSupabaseTicket,
+    _handleConnectProject,
+    _handleSelectTicket,
+    _handleRefreshTickets,
+    _handleSupabaseConnect,
+    _handleSelectSupabaseTicket,
     _handlePreviewSync,
     _handleRunSync,
   ]
@@ -1419,129 +1428,21 @@ function App() {
       <h1>Portfolio 2026</h1>
       <p className="subtitle">Project Zero: Kanban</p>
 
-      <section className="tickets-docs-section" aria-label="Ticket Store">
-        <h2>Ticket Store</h2>
-        <div className="ticket-store-mode">
-          <button
-            type="button"
-            className={`mode-tab ${ticketStoreMode === 'docs' ? 'active' : ''}`}
-            onClick={() => setTicketStoreMode('docs')}
+      <header className="app-header-bar" aria-label="Project and connection">
+        <div className="project-dropdown-wrap">
+          <label htmlFor="project-select" className="project-label">Project</label>
+          <select
+            id="project-select"
+            className="project-select"
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            aria-label="Project"
           >
-            Docs (File System)
-          </button>
-          <button
-            type="button"
-            className={`mode-tab ${ticketStoreMode === 'supabase' ? 'active' : ''}`}
-            onClick={() => setTicketStoreMode('supabase')}
-          >
-            Supabase
-          </button>
+            {PROJECT_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
         </div>
-
-        {ticketStoreMode === 'docs' && (
-          <>
-            <p
-              className="tickets-status"
-              data-status={ticketStoreConnected ? 'connected' : 'disconnected'}
-            >
-              {ticketStoreConnected ? 'Connected (read + write)' : 'Not connected'}
-            </p>
-            <p className="tickets-explanation">
-              Connect a project folder to read tickets from <code>docs/tickets/*.md</code> and sync kanban state.
-            </p>
-            {!ticketStoreConnected ? (
-              <button
-                type="button"
-                className="connect-project-btn"
-                onClick={handleConnectProject}
-              >
-                Connect Project Folder
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="refresh-tickets-btn"
-                onClick={handleRefreshTickets}
-              >
-                Refresh Tickets
-              </button>
-            )}
-            {ticketStoreConnectMessage && (
-              <p className="tickets-message">{ticketStoreConnectMessage}</p>
-            )}
-            {ticketStoreLastError && (
-              <p className="tickets-message tickets-error">{ticketStoreLastError}</p>
-            )}
-            {ticketStoreConnected && (
-              <p className="tickets-count">
-                {ticketStoreFiles.length} ticket(s) found
-                {ticketStoreLastRefresh && ` (refreshed ${ticketStoreLastRefresh.toLocaleTimeString()})`}
-              </p>
-            )}
-            {lastSavedTicketPath && lastSavedAt && (
-              <p className="tickets-saved">
-                Saved: {lastSavedTicketPath} at {lastSavedAt.toLocaleTimeString()}
-              </p>
-            )}
-            {lastWriteError && (
-              <p className="tickets-message tickets-error">Write error: {lastWriteError}</p>
-            )}
-          </>
-        )}
-
-        {ticketStoreMode === 'supabase' && (
-          <>
-            <p
-              className="tickets-status"
-              data-status={supabaseConnectionStatus}
-            >
-              {supabaseConnectionStatus === 'connecting'
-                ? 'Connecting…'
-                : supabaseConnectionStatus === 'connected'
-                  ? 'Connected'
-                  : 'Disconnected'}
-            </p>
-            {supabaseConnectionStatus !== 'connected' && (
-              <div className="supabase-config">
-                <label>
-                  Project URL
-                  <input
-                    type="text"
-                    value={supabaseProjectUrl}
-                    onChange={(e) => setSupabaseProjectUrl(e.target.value)}
-                    placeholder="https://xxx.supabase.co"
-                  />
-                </label>
-                <label>
-                  Anon Key
-                  <input
-                    type="password"
-                    value={supabaseAnonKey}
-                    onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                    placeholder="eyJ..."
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="connect-project-btn"
-                  onClick={handleSupabaseConnect}
-                >
-                  Connect to Supabase
-                </button>
-              </div>
-            )}
-            {supabaseLastError && (
-              <p className="tickets-message tickets-error">{supabaseLastError}</p>
-            )}
-            {supabaseConnectionStatus === 'connected' && (
-              <p className="tickets-count">
-                {supabaseTickets.length} ticket(s) in Supabase
-                {supabaseLastRefresh && ` (refreshed ${supabaseLastRefresh.toLocaleTimeString()})`}
-              </p>
-            )}
-          </>
-        )}
-
         <button
           type="button"
           className="new-hal-project-btn"
@@ -1552,7 +1453,14 @@ function App() {
         >
           New HAL project
         </button>
-      </section>
+        <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
+          {supabaseConnectionStatus === 'connecting'
+            ? 'Connecting…'
+            : supabaseConnectionStatus === 'connected'
+              ? 'Connected'
+              : 'Disconnected'}
+        </p>
+      </header>
 
       {newHalWizardOpen && (
         <div className="modal-backdrop" role="dialog" aria-label="New HAL project wizard">
