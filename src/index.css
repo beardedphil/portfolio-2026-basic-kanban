@@ -379,6 +379,33 @@ h1 {
   line-height: 1.35;
 }
 
+.wizard-v1 {
+  border-top: 1px solid #eee;
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+.wizard-help {
+  margin: 0.25rem 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+.wizard-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.wizard-status {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+.wizard-error {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.9rem;
+  color: #c00;
+}
+
 /* Tickets (Docs) section */
 .tickets-docs-section {
   margin-bottom: 1.5rem;

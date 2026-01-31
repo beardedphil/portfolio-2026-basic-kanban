@@ -471,6 +471,10 @@ function App() {
     addedToHalSuperProject: false,
   })
   const [newHalReport, setNewHalReport] = useState<string | null>(null)
+  const [newHalTemplateRoot, setNewHalTemplateRoot] = useState<FileSystemDirectoryHandle | null>(null)
+  const [newHalTargetRoot, setNewHalTargetRoot] = useState<FileSystemDirectoryHandle | null>(null)
+  const [newHalBootstrapLog, setNewHalBootstrapLog] = useState<string | null>(null)
+  const [newHalBootstrapError, setNewHalBootstrapError] = useState<string | null>(null)
   // Supabase (read-only v0)
   const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
@@ -996,6 +1000,76 @@ function App() {
     setNewHalReport(lines.join('\n'))
   }, [newHalChecklist, newHalProjectName, newHalRepoUrl])
 
+  const pickWizardFolder = useCallback(async (mode: 'read' | 'readwrite') => {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      throw new Error('Folder picker not supported in this browser.')
+    }
+    return await window.showDirectoryPicker({ mode })
+  }, [])
+
+  const copyTextFile = useCallback(
+    async (srcDir: FileSystemDirectoryHandle, destDir: FileSystemDirectoryHandle, relPath: string) => {
+      const parts = relPath.split('/').filter(Boolean)
+      const fileName = parts.pop()
+      if (!fileName) throw new Error(`Invalid path: ${relPath}`)
+
+      let curSrc: FileSystemDirectoryHandle = srcDir
+      let curDest: FileSystemDirectoryHandle = destDir
+      for (const p of parts) {
+        curSrc = await curSrc.getDirectoryHandle(p)
+        curDest = await curDest.getDirectoryHandle(p, { create: true })
+      }
+
+      const srcFileHandle = await curSrc.getFileHandle(fileName)
+      const srcFile = await srcFileHandle.getFile()
+      const text = await srcFile.text()
+
+      const destFileHandle = await curDest.getFileHandle(fileName, { create: true })
+      const writable = await destFileHandle.createWritable()
+      await writable.write(text)
+      await writable.close()
+    },
+    []
+  )
+
+  const runWizardBootstrap = useCallback(async () => {
+    if (!newHalTemplateRoot || !newHalTargetRoot) {
+      setNewHalBootstrapError('Select both a scaffold folder and a destination folder first.')
+      return
+    }
+    setNewHalBootstrapError(null)
+    setNewHalBootstrapLog(null)
+
+    const filesToCopy = [
+      '.gitignore',
+      '.env.example',
+      'package.json',
+      'scripts/sync-tickets.js',
+      'docs/process/ticket-verification-rules.md',
+      'docs/templates/ticket.template.md',
+      'docs/templates/pm-review.template.md',
+      'docs/templates/agent-task-prompt.template.md',
+      'docs/tickets/README.md',
+      'docs/audit/README.md',
+      '.cursor/rules/auditability-and-traceability.mdc',
+      '.cursor/rules/bugfix-tracking.mdc',
+      '.cursor/rules/build-config-hygiene.mdc',
+      '.cursor/rules/conversation-protocol.mdc',
+      '.cursor/rules/done-means-pushed.mdc',
+      '.cursor/rules/scope-discipline.mdc',
+      '.cursor/rules/task-sizing-and-in-app-debugging.mdc',
+      '.cursor/rules/ticket-writing-sync-tickets.mdc',
+    ]
+
+    const written: string[] = []
+    for (const rel of filesToCopy) {
+      await copyTextFile(newHalTemplateRoot, newHalTargetRoot, rel)
+      written.push(rel)
+    }
+    setNewHalBootstrapLog(`Wrote ${written.length} file(s):\n` + written.map((p) => `- ${p}`).join('\n'))
+    setNewHalChecklist((p) => ({ ...p, copiedScaffold: true }))
+  }, [copyTextFile, newHalTargetRoot, newHalTemplateRoot])
+
   const findColumnByCardId = useCallback(
     (cardId: string) => columnsForDisplay.find((c) => c.cardIds.includes(cardId)),
     [columnsForDisplay]
@@ -1470,10 +1544,64 @@ function App() {
                   setNewHalRepoUrl('')
                   setNewHalChecklist({ createdRepo: false, copiedScaffold: false, setEnv: false, addedToHalSuperProject: false })
                   setNewHalReport(null)
+                  setNewHalTemplateRoot(null)
+                  setNewHalTargetRoot(null)
+                  setNewHalBootstrapLog(null)
+                  setNewHalBootstrapError(null)
                 }}
               >
                 Reset
               </button>
+            </div>
+
+            <div className="wizard-v1">
+              <p className="field-label">Wizard v1: copy scaffold (writes files)</p>
+              <p className="wizard-help">
+                Select the scaffold folder (recommended: this repo’s <code>hal-template/</code>) and a destination folder for your new project, then copy.
+              </p>
+              <div className="wizard-actions">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const dir = await pickWizardFolder('read')
+                      setNewHalTemplateRoot(dir)
+                      setNewHalBootstrapError(null)
+                    } catch (e) {
+                      setNewHalBootstrapError(e instanceof Error ? e.message : String(e))
+                    }
+                  }}
+                >
+                  Select scaffold folder
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const dir = await pickWizardFolder('readwrite')
+                      setNewHalTargetRoot(dir)
+                      setNewHalBootstrapError(null)
+                    } catch (e) {
+                      setNewHalBootstrapError(e instanceof Error ? e.message : String(e))
+                    }
+                  }}
+                >
+                  Select destination folder
+                </button>
+                <button type="button" className="primary" onClick={runWizardBootstrap}>
+                  Copy scaffold
+                </button>
+              </div>
+
+              <p className="wizard-status">
+                Scaffold selected: {String(!!newHalTemplateRoot)} | Destination selected: {String(!!newHalTargetRoot)}
+              </p>
+              {newHalBootstrapError && (
+                <p className="wizard-error" role="alert">
+                  {newHalBootstrapError}
+                </p>
+              )}
+              {newHalBootstrapLog && <pre className="report-pre">{newHalBootstrapLog}</pre>}
             </div>
 
             {newHalReport && (
