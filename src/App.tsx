@@ -52,6 +52,15 @@ type SupabaseTicketRow = {
   updated_at: string
 }
 
+/** Supabase kanban_columns table row (0020) */
+type SupabaseKanbanColumnRow = {
+  id: string
+  title: string
+  position: number
+  created_at: string
+  updated_at: string
+}
+
 /** Parsed ticket from docs/tickets/*.md for import */
 type ParsedDocTicket = {
   id: string
@@ -105,6 +114,23 @@ const _SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   kanban_moved_at timestamptz null,
   updated_at timestamptz not null default now()
 );`
+
+/** kanban_columns table (0020); run in Supabase SQL editor if missing */
+const _SUPABASE_KANBAN_COLUMNS_SETUP_SQL = `create table if not exists public.kanban_columns (
+  id text primary key,
+  title text not null,
+  position int not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);`
+
+/** Default columns to seed when kanban_columns is empty (0020); backward-compatible IDs */
+const DEFAULT_KANBAN_COLUMNS_SEED = [
+  { id: 'col-unassigned', title: 'Unassigned', position: 0 },
+  { id: 'col-todo', title: 'To-do', position: 1 },
+  { id: 'col-doing', title: 'Doing', position: 2 },
+  { id: 'col-done', title: 'Done', position: 3 },
+] as const
 
 /** First 4 digits from filename (e.g. 0009-...md → 0009). Invalid → null. */
 function extractTicketId(filename: string): string | null {
@@ -482,7 +508,11 @@ function App() {
   const [supabaseConnectionStatus, setSupabaseConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const [supabaseLastError, setSupabaseLastError] = useState<string | null>(null)
   const [supabaseTickets, setSupabaseTickets] = useState<SupabaseTicketRow[]>([])
+  const [supabaseColumnsRows, setSupabaseColumnsRows] = useState<SupabaseKanbanColumnRow[]>([])
   const [supabaseLastRefresh, setSupabaseLastRefresh] = useState<Date | null>(null)
+  const [supabaseColumnsLastRefresh, setSupabaseColumnsLastRefresh] = useState<Date | null>(null)
+  const [supabaseColumnsLastError, setSupabaseColumnsLastError] = useState<string | null>(null)
+  const [supabaseColumnsJustInitialized, setSupabaseColumnsJustInitialized] = useState(false)
   const [_supabaseNotInitialized, setSupabaseNotInitialized] = useState(false)
   const [_selectedSupabaseTicketId, setSelectedSupabaseTicketId] = useState<string | null>(null)
   const [_selectedSupabaseTicketContent, setSelectedSupabaseTicketContent] = useState<string | null>(null)
@@ -493,35 +523,39 @@ function App() {
   const [_syncProgressText, setSyncProgressText] = useState<string | null>(null)
   const [supabaseLastSyncError, setSupabaseLastSyncError] = useState<string | null>(null)
 
-  // Supabase board: when connected, board is driven by supabaseTickets
+  // Supabase board: when connected, board is driven by supabaseTickets + supabaseColumnsRows (0020)
   const supabaseBoardActive = supabaseConnectionStatus === 'connected'
-  const supabaseColumns = useMemo(() => {
-    if (!supabaseBoardActive) return EMPTY_KANBAN_COLUMNS
-    const byColumn: Record<string, { id: string; position: number }[]> = {
-      'col-unassigned': [],
-      'col-todo': [],
-      'col-doing': [],
-      'col-done': [],
+  const { columns: supabaseColumns, unknownColumnTicketIds: supabaseUnknownColumnTicketIds } = useMemo(() => {
+    if (!supabaseBoardActive || supabaseColumnsRows.length === 0) {
+      return { columns: EMPTY_KANBAN_COLUMNS, unknownColumnTicketIds: [] as string[] }
     }
+    const columnIds = new Set(supabaseColumnsRows.map((c) => c.id))
+    const firstColumnId = supabaseColumnsRows[0].id
+    const byColumn: Record<string, { id: string; position: number }[]> = {}
+    for (const c of supabaseColumnsRows) {
+      byColumn[c.id] = []
+    }
+    const unknownIds: string[] = []
     for (const t of supabaseTickets) {
-      const colId = t.kanban_column_id == null || t.kanban_column_id === ''
-        ? 'col-unassigned'
-        : KANBAN_COLUMN_IDS.includes(t.kanban_column_id as (typeof KANBAN_COLUMN_IDS)[number])
-          ? t.kanban_column_id
-          : 'col-unassigned'
+      const colId =
+        t.kanban_column_id == null || t.kanban_column_id === ''
+          ? firstColumnId
+          : columnIds.has(t.kanban_column_id)
+            ? t.kanban_column_id
+            : (unknownIds.push(t.id), firstColumnId)
       const pos = typeof t.kanban_position === 'number' ? t.kanban_position : 0
       byColumn[colId].push({ id: t.id, position: pos })
     }
-    for (const id of KANBAN_COLUMN_IDS) {
+    for (const id of Object.keys(byColumn)) {
       byColumn[id].sort((a, b) => a.position - b.position)
     }
-    return [
-      { id: 'col-unassigned', title: 'Unassigned', cardIds: byColumn['col-unassigned'].map((x) => x.id) },
-      { id: 'col-todo', title: 'To-do', cardIds: byColumn['col-todo'].map((x) => x.id) },
-      { id: 'col-doing', title: 'Doing', cardIds: byColumn['col-doing'].map((x) => x.id) },
-      { id: 'col-done', title: 'Done', cardIds: byColumn['col-done'].map((x) => x.id) },
-    ]
-  }, [supabaseBoardActive, supabaseTickets])
+    const columns: Column[] = supabaseColumnsRows.map((c) => ({
+      id: c.id,
+      title: c.title,
+      cardIds: byColumn[c.id]?.map((x) => x.id) ?? [],
+    }))
+    return { columns, unknownColumnTicketIds: unknownIds }
+  }, [supabaseBoardActive, supabaseColumnsRows, supabaseTickets])
   const supabaseCards = useMemo(() => {
     const map: Record<string, Card> = {}
     for (const t of supabaseTickets) {
@@ -560,6 +594,7 @@ function App() {
         }
         setSupabaseConnectionStatus('disconnected')
         setSupabaseTickets([])
+        setSupabaseColumnsRows([])
         return
       }
       const { data: rows, error } = await client
@@ -570,9 +605,60 @@ function App() {
         setSupabaseLastError(error.message ?? String(error))
         setSupabaseConnectionStatus('disconnected')
         setSupabaseTickets([])
+        setSupabaseColumnsRows([])
         return
       }
       setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
+
+      // Fetch kanban_columns (0020); init defaults if empty
+      setSupabaseColumnsLastError(null)
+      const { data: colRows, error: colError } = await client
+        .from('kanban_columns')
+        .select('id, title, position, created_at, updated_at')
+        .order('position', { ascending: true })
+      if (colError) {
+        const code = (colError as { code?: string }).code
+        const msg = colError.message ?? String(colError)
+        const lower = msg.toLowerCase()
+        const isTableMissing =
+          code === '42P01' ||
+          lower.includes('relation') ||
+          lower.includes('does not exist') ||
+          lower.includes('could not find')
+        if (isTableMissing) {
+          setSupabaseColumnsLastError('kanban_columns table missing. Run: ' + _SUPABASE_KANBAN_COLUMNS_SETUP_SQL.slice(0, 80) + '...')
+          setSupabaseLastError('Supabase schema incomplete (kanban_columns table missing).')
+        } else {
+          setSupabaseColumnsLastError(msg)
+        }
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+        setSupabaseColumnsRows([])
+        return
+      }
+      let finalColRows = (colRows ?? []) as SupabaseKanbanColumnRow[]
+      if (finalColRows.length === 0) {
+        for (const seed of DEFAULT_KANBAN_COLUMNS_SEED) {
+          const { error: insErr } = await client.from('kanban_columns').insert(seed)
+          if (insErr) {
+            setSupabaseColumnsLastError(insErr.message ?? String(insErr))
+            setSupabaseLastError('Failed to initialize default columns: ' + (insErr.message ?? String(insErr)))
+            setSupabaseConnectionStatus('disconnected')
+            setSupabaseTickets([])
+            setSupabaseColumnsRows([])
+            return
+          }
+        }
+        const { data: afterRows } = await client
+          .from('kanban_columns')
+          .select('id, title, position, created_at, updated_at')
+          .order('position', { ascending: true })
+        finalColRows = (afterRows ?? []) as SupabaseKanbanColumnRow[]
+        setSupabaseColumnsJustInitialized(true)
+      }
+
+      setSupabaseColumnsRows(finalColRows)
+      setSupabaseColumnsLastRefresh(new Date())
       setSupabaseLastRefresh(new Date())
       setSupabaseConnectionStatus('connected')
       setSupabaseProjectUrl(url)
@@ -582,6 +668,7 @@ function App() {
       setSupabaseLastError(e instanceof Error ? e.message : String(e))
       setSupabaseConnectionStatus('disconnected')
       setSupabaseTickets([])
+      setSupabaseColumnsRows([])
     }
   }, [])
 
@@ -650,6 +737,7 @@ function App() {
         setProjectName(null)
         setSupabaseConnectionStatus('disconnected')
         setSupabaseTickets([])
+        setSupabaseColumnsRows([])
       }
     }
     
@@ -794,7 +882,7 @@ function App() {
     setSelectedSupabaseTicketContent(row.body_md ?? '')
   }, [])
 
-  /** Refetch tickets from Supabase (e.g. after import, after DnD). Uses current url/key. */
+  /** Refetch tickets and columns from Supabase (0020). Uses current url/key. */
   const refetchSupabaseTickets = useCallback(async (): Promise<boolean> => {
     const url = supabaseProjectUrl.trim()
     const key = supabaseAnonKey.trim()
@@ -811,6 +899,18 @@ function App() {
       }
       setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
       setSupabaseLastRefresh(new Date())
+
+      const { data: colRows, error: colError } = await client
+        .from('kanban_columns')
+        .select('id, title, position, created_at, updated_at')
+        .order('position', { ascending: true })
+      if (colError) {
+        setSupabaseColumnsLastError(colError.message ?? String(colError))
+      } else {
+        setSupabaseColumnsRows((colRows ?? []) as SupabaseKanbanColumnRow[])
+        setSupabaseColumnsLastRefresh(new Date())
+        setSupabaseColumnsLastError(null)
+      }
       return true
     } catch {
       return false
@@ -854,6 +954,15 @@ function App() {
     const id = setInterval(refetchSupabaseTickets, SUPABASE_POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [supabaseBoardActive, refetchSupabaseTickets])
+
+  // Log "Initialized default columns" when we seed kanban_columns (0020)
+  useEffect(() => {
+    if (!supabaseColumnsJustInitialized) return
+    const at = formatTime()
+    const id = Date.now()
+    setActionLog((prev) => [...prev.slice(-19), { id, message: 'Initialized default columns', at }])
+    setSupabaseColumnsJustInitialized(false)
+  }, [supabaseColumnsJustInitialized])
 
   const _handlePreviewSync = useCallback(async () => {
     const root = ticketStoreRootHandle
@@ -984,15 +1093,22 @@ function App() {
         .select('id, kanban_column_id, kanban_position')
         .order('id')
       const afterRefetch = (afterRows ?? []) as SupabaseTicketRow[]
+      const { data: colRows } = await client
+        .from('kanban_columns')
+        .select('id')
+        .order('position', { ascending: true })
+      const validColumnIds = new Set((colRows ?? []).map((r: { id: string }) => r.id))
+      const firstColumnId = (colRows?.[0] as { id: string } | undefined)?.id ?? 'col-unassigned'
       const unassigned = afterRefetch.filter(
-        (r) => r.kanban_column_id == null || r.kanban_column_id === '' || !KANBAN_COLUMN_IDS.includes(r.kanban_column_id as (typeof KANBAN_COLUMN_IDS)[number])
+        (r) =>
+          r.kanban_column_id == null || r.kanban_column_id === '' || !validColumnIds.has(r.kanban_column_id)
       )
       const movedAt = new Date().toISOString()
       for (let i = 0; i < unassigned.length; i++) {
         await client
           .from('tickets')
           .update({
-            kanban_column_id: 'col-unassigned',
+            kanban_column_id: firstColumnId,
             kanban_position: i,
             kanban_moved_at: movedAt,
           })
@@ -1182,13 +1298,15 @@ function App() {
     [findColumnById]
   )
 
-  const handleCreateColumn = useCallback(() => {
+  const handleCreateColumn = useCallback(async () => {
     const title = newColumnTitle.trim()
     if (!title) return
-    const cols = ticketStoreConnected ? ticketColumns : columns
-    const setCols = ticketStoreConnected ? setTicketColumns : setColumns
     const normalized = normalizeTitle(title)
-    const checkCols = supabaseBoardActive ? [...supabaseColumns, ...cols] : cols
+    const checkCols = supabaseBoardActive
+      ? supabaseColumns
+      : ticketStoreConnected
+        ? ticketColumns
+        : columns
     const isDuplicate = checkCols.some((c) => normalizeTitle(c.title) === normalized)
     if (isDuplicate) {
       setAddColumnError('Column title must be unique.')
@@ -1196,12 +1314,55 @@ function App() {
       return
     }
     setAddColumnError(null)
+    if (supabaseBoardActive) {
+      const url = supabaseProjectUrl.trim()
+      const key = supabaseAnonKey.trim()
+      if (!url || !key) {
+        setAddColumnError('Supabase not configured.')
+        return
+      }
+      const colId = stableColumnId()
+      const maxPos = supabaseColumnsRows.reduce((m, c) => Math.max(m, c.position), -1)
+      const position = maxPos + 1
+      try {
+        const client = createClient(url, key)
+        const { error } = await client.from('kanban_columns').insert({ id: colId, title, position })
+        if (error) {
+          setAddColumnError(error.message ?? String(error))
+          setSupabaseColumnsLastError(error.message ?? String(error))
+          addLog(`Column add failed: ${error.message ?? String(error)}`)
+          return
+        }
+        await refetchSupabaseTickets()
+        setNewColumnTitle('')
+        setShowAddColumnForm(false)
+        addLog(`Column added: "${title}"`)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setAddColumnError(msg)
+        addLog(`Column add failed: ${msg}`)
+      }
+      return
+    }
+    const setCols = ticketStoreConnected ? setTicketColumns : setColumns
     const col: Column = { id: stableColumnId(), title, cardIds: [] }
     setCols((prev) => [...prev, col])
     setNewColumnTitle('')
     setShowAddColumnForm(false)
     addLog(`Column added: "${title}"`)
-  }, [newColumnTitle, ticketStoreConnected, ticketColumns, columns, supabaseBoardActive, supabaseColumns, addLog])
+  }, [
+    newColumnTitle,
+    ticketStoreConnected,
+    ticketColumns,
+    columns,
+    supabaseBoardActive,
+    supabaseColumns,
+    supabaseColumnsRows,
+    supabaseProjectUrl,
+    supabaseAnonKey,
+    refetchSupabaseTickets,
+    addLog,
+  ])
 
   const handleCancelAddColumn = useCallback(() => {
     setNewColumnTitle('')
@@ -1476,6 +1637,7 @@ function App() {
     DEFAULT_COLUMNS,
     INITIAL_CARDS,
     _SUPABASE_SETUP_SQL,
+    _SUPABASE_KANBAN_COLUMNS_SETUP_SQL,
     _DraggableTicketItem,
     _DraggableSupabaseTicketItem,
     ticketStoreConnectMessage,
@@ -1523,6 +1685,7 @@ function App() {
                     setProjectName(null)
                     setSupabaseConnectionStatus('disconnected')
                     setSupabaseTickets([])
+                    setSupabaseColumnsRows([])
                   }}
                 >
                   Disconnect
@@ -1722,9 +1885,7 @@ function App() {
         onDragEnd={handleDragEnd}
       >
         <section className="columns-section" aria-label="Columns">
-          {!supabaseBoardActive && (
-            <>
-              <button
+          <button
                 type="button"
                 className="add-column-btn"
                 onClick={() => {
@@ -1765,8 +1926,6 @@ function App() {
                   </div>
                 </div>
               )}
-            </>
-          )}
           <SortableContext
             items={columnsForDisplay.map((c) => c.id)}
             strategy={horizontalListSortingStrategy}
@@ -1778,7 +1937,7 @@ function App() {
                   col={col}
                   cards={cardsForDisplay}
                   onRemove={handleRemoveColumn}
-                  hideRemove={ticketStoreConnected || (supabaseBoardActive && (KANBAN_COLUMN_IDS as readonly string[]).includes(col.id))}
+                  hideRemove={ticketStoreConnected || supabaseBoardActive}
                 />
               ))}
             </div>
@@ -1848,6 +2007,19 @@ function App() {
               <p>Last poll time: {supabaseLastRefresh ? supabaseLastRefresh.toISOString() : 'never'}</p>
               <p>Last poll error: {supabaseLastError ?? 'none'}</p>
               <p>Last sync error: {supabaseLastSyncError ?? 'none'}</p>
+              {supabaseBoardActive && (
+                <>
+                  <p>Columns source: Supabase</p>
+                  <p>Column count: {supabaseColumnsRows.length}</p>
+                  <p>Last columns refresh: {supabaseColumnsLastRefresh ? supabaseColumnsLastRefresh.toISOString() : 'never'}</p>
+                  <p>Last columns error: {supabaseColumnsLastError ?? 'none'}</p>
+                  {supabaseUnknownColumnTicketIds.length > 0 && (
+                    <p className="debug-unknown-columns" role="status">
+                      Tickets with unknown column (moved to first): {supabaseUnknownColumnTicketIds.join(', ')}
+                    </p>
+                  )}
+                </>
+              )}
               <p className="kanban-column-ticket-ids">Per-column ticket IDs: {kanbanColumnTicketIdsDisplay}</p>
             </div>
           </section>
