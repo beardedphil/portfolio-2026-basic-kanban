@@ -459,6 +459,18 @@ function App() {
   const [ticketStoreMode, _setTicketStoreMode] = useState<'docs' | 'supabase'>('supabase')
   // Project selector (0014); single option for now
   const [selectedProjectId, setSelectedProjectId] = useState<string>(PROJECT_OPTIONS[0].id)
+
+  // New HAL project wizard (v0 checklist-only)
+  const [newHalWizardOpen, setNewHalWizardOpen] = useState(false)
+  const [newHalProjectName, setNewHalProjectName] = useState('')
+  const [newHalRepoUrl, setNewHalRepoUrl] = useState('')
+  const [newHalChecklist, setNewHalChecklist] = useState({
+    createdRepo: false,
+    copiedScaffold: false,
+    setEnv: false,
+    addedToHalSuperProject: false,
+  })
+  const [newHalReport, setNewHalReport] = useState<string | null>(null)
   // Supabase (read-only v0)
   const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
@@ -969,6 +981,21 @@ function App() {
     addLog(next ? 'Debug toggled ON' : 'Debug toggled OFF')
   }, [debugOpen, addLog])
 
+  const generateNewHalReport = useCallback(() => {
+    const lines = [
+      'HAL project bootstrap report (wizard v0)',
+      `GeneratedAt: ${new Date().toISOString()}`,
+      `ProjectName: ${newHalProjectName || '(not set)'}`,
+      `RepoUrl: ${newHalRepoUrl || '(not set)'}`,
+      'Checklist:',
+      `- createdRepo: ${newHalChecklist.createdRepo}`,
+      `- copiedScaffold: ${newHalChecklist.copiedScaffold}`,
+      `- setEnv: ${newHalChecklist.setEnv}`,
+      `- addedToHalSuperProject: ${newHalChecklist.addedToHalSuperProject}`,
+    ]
+    setNewHalReport(lines.join('\n'))
+  }, [newHalChecklist, newHalProjectName, newHalRepoUrl])
+
   const findColumnByCardId = useCallback(
     (cardId: string) => columnsForDisplay.find((c) => c.cardIds.includes(cardId)),
     [columnsForDisplay]
@@ -1342,6 +1369,16 @@ function App() {
             ))}
           </select>
         </div>
+        <button
+          type="button"
+          className="new-hal-project-btn"
+          onClick={() => {
+            setNewHalWizardOpen(true)
+            setNewHalReport(null)
+          }}
+        >
+          New HAL project
+        </button>
         <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
           {supabaseConnectionStatus === 'connecting'
             ? 'Connecting…'
@@ -1350,6 +1387,104 @@ function App() {
               : 'Disconnected'}
         </p>
       </header>
+
+      {newHalWizardOpen && (
+        <div className="modal-backdrop" role="dialog" aria-label="New HAL project wizard">
+          <div className="modal">
+            <div className="modal-header">
+              <h2 className="modal-title">New HAL project (wizard v0)</h2>
+              <button type="button" className="modal-close" onClick={() => setNewHalWizardOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <p className="modal-subtitle">
+              This is a checklist-only wizard. It helps you set up a new repo without losing the rules/docs/process we learned in Project 0.
+            </p>
+
+            <div className="modal-grid">
+              <label className="field">
+                <span className="field-label">Project name</span>
+                <input
+                  className="field-input"
+                  value={newHalProjectName}
+                  onChange={(e) => setNewHalProjectName(e.target.value)}
+                  placeholder="portfolio-2026-project-1"
+                />
+              </label>
+
+              <label className="field">
+                <span className="field-label">Repo URL (optional)</span>
+                <input
+                  className="field-input"
+                  value={newHalRepoUrl}
+                  onChange={(e) => setNewHalRepoUrl(e.target.value)}
+                  placeholder="https://github.com/you/portfolio-2026-project-1"
+                />
+              </label>
+            </div>
+
+            <div className="checklist">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={newHalChecklist.createdRepo}
+                  onChange={(e) => setNewHalChecklist((p) => ({ ...p, createdRepo: e.target.checked }))}
+                />
+                <span>Repo created (local + remote)</span>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={newHalChecklist.copiedScaffold}
+                  onChange={(e) => setNewHalChecklist((p) => ({ ...p, copiedScaffold: e.target.checked }))}
+                />
+                <span>Copied scaffold (`.cursor/rules`, `docs/`, `scripts/sync-tickets.js`, `.env.example`)</span>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={newHalChecklist.setEnv}
+                  onChange={(e) => setNewHalChecklist((p) => ({ ...p, setEnv: e.target.checked }))}
+                />
+                <span>Configured `.env` (Supabase keys) and confirmed `.env` is ignored</span>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={newHalChecklist.addedToHalSuperProject}
+                  onChange={(e) => setNewHalChecklist((p) => ({ ...p, addedToHalSuperProject: e.target.checked }))}
+                />
+                <span>Added as submodule in HAL super-project</span>
+              </label>
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="primary" onClick={generateNewHalReport}>
+                Generate bootstrap report
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewHalProjectName('')
+                  setNewHalRepoUrl('')
+                  setNewHalChecklist({ createdRepo: false, copiedScaffold: false, setEnv: false, addedToHalSuperProject: false })
+                  setNewHalReport(null)
+                }}
+              >
+                Reset
+              </button>
+            </div>
+
+            {newHalReport && (
+              <div className="report">
+                <p className="field-label">Bootstrap report</p>
+                <pre className="report-pre">{newHalReport}</pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showConfigMissingError && (
         <div className="config-missing-error" role="alert">

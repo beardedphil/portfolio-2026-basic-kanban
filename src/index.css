@@ -65,6 +65,18 @@ h1 {
 .connection-status[data-status="connecting"] {
   color: #888;
 }
+.new-hal-project-btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  background: #333;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+}
+.new-hal-project-btn:hover {
+  background: #555;
+}
 .config-missing-error {
   padding: 0.75rem 1rem;
   background: #fef3cd;
@@ -253,6 +265,118 @@ h1 {
 .error-section.empty {
   color: #888;
   font-style: italic;
+}
+
+/* Modal (wizard v0) */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 50;
+}
+.modal {
+  width: min(720px, 100%);
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  padding: 1rem;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.modal-title {
+  font-size: 1.15rem;
+  margin: 0;
+}
+.modal-close {
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+}
+.modal-close:hover {
+  background: #e8e8e8;
+}
+.modal-subtitle {
+  margin: 0 0 1rem 0;
+  color: #555;
+  font-size: 0.95rem;
+}
+.modal-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+.field-label {
+  font-size: 0.85rem;
+  color: #555;
+  font-weight: 600;
+}
+.field-input {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+.checklist {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.95rem;
+}
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.modal-actions button {
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+}
+.modal-actions button:hover {
+  background: #e8e8e8;
+}
+.modal-actions .primary {
+  background: #333;
+  color: #fff;
+  border: none;
+}
+.modal-actions .primary:hover {
+  background: #555;
+}
+.report-pre {
+  margin: 0.25rem 0 0 0;
+  padding: 0.75rem;
+  background: #f7f7f7;
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+  overflow: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 /* Tickets (Docs) section */
