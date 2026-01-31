@@ -10,6 +10,15 @@ alwaysApply: true
   - it is required to satisfy an acceptance criterion, OR
   - it fixes a bug introduced by the task, AND it is documented.
 
+## No “scope smuggling” via commits
+
+- If you must do additional work that is outside the ticket:
+  - do not bundle it into the ticket’s implementation commits, and
+  - do not ship it under an unlabeled commit while still claiming it “belongs to the ticket.”
+- Instead:
+  - create a new ticket (preferred), OR
+  - document the deviation in `docs/audit/<task-id>-<short-title>/decisions.md` under **Unrequested changes (required)** and include the ticket ID in commit subjects for any commits that still belong to the ticket.
+
 ## Required documentation when deviations are unavoidable
 
 - If you must make a change not explicitly requested:
