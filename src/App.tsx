@@ -95,8 +95,6 @@ type SyncPreviewResult = {
 const SUPABASE_CONFIG_KEY = 'supabase-ticketstore-config'
 /** Polling interval when Supabase board is active (0013); 10s */
 const SUPABASE_POLL_INTERVAL_MS = 10_000
-/** Project dropdown options (0014); UI-only for now */
-const PROJECT_OPTIONS = [{ id: 'hal-kanban', label: 'hal-kanban' }] as const
 const _SUPABASE_SETUP_SQL = `create table if not exists public.tickets (
   id text primary key,
   filename text not null,
@@ -430,8 +428,8 @@ function App() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [actionLog, setActionLog] = useState<LogEntry[]>([])
   const [runtimeError, _setRuntimeError] = useState<string | null>(null)
-  const [columns, setColumns] = useState<Column[]>(() => DEFAULT_COLUMNS)
-  const [cards] = useState<Record<string, Card>>(() => ({ ...INITIAL_CARDS }))
+  const [columns, setColumns] = useState<Column[]>(() => EMPTY_KANBAN_COLUMNS)
+  const [cards] = useState<Record<string, Card>>({})
   const [showAddColumnForm, setShowAddColumnForm] = useState(false)
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [addColumnError, setAddColumnError] = useState<string | null>(null)
@@ -444,7 +442,7 @@ function App() {
   const [ticketStoreFiles, setTicketStoreFiles] = useState<TicketFile[]>([])
   const [ticketStoreLastRefresh, setTicketStoreLastRefresh] = useState<Date | null>(null)
   const [ticketStoreLastError, setTicketStoreLastError] = useState<string | null>(null)
-  const [_ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
+  const [ticketStoreConnectMessage, setTicketStoreConnectMessage] = useState<string | null>(null)
   const [selectedTicketPath, setSelectedTicketPath] = useState<string | null>(null)
   const [selectedTicketContent, setSelectedTicketContent] = useState<string | null>(null)
   const [_ticketViewerLoading, setTicketViewerLoading] = useState(false)
@@ -455,10 +453,10 @@ function App() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [lastWriteError, setLastWriteError] = useState<string | null>(null)
 
-  // Ticket Store mode: Docs (folder) vs Supabase; main UI uses Supabase only (0014)
-  const [ticketStoreMode, _setTicketStoreMode] = useState<'docs' | 'supabase'>('supabase')
-  // Project selector (0014); single option for now
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(PROJECT_OPTIONS[0].id)
+  // Project folder and connection state
+  const [projectFolderHandle, setProjectFolderHandle] = useState<FileSystemDirectoryHandle | null>(null)
+  const [projectName, setProjectName] = useState<string | null>(null)
+  const [connectError, setConnectError] = useState<string | null>(null)
 
   // New HAL project wizard (v0 checklist-only)
   const [newHalWizardOpen, setNewHalWizardOpen] = useState(false)
@@ -492,9 +490,8 @@ function App() {
   const [_syncProgressText, setSyncProgressText] = useState<string | null>(null)
   const [supabaseLastSyncError, setSupabaseLastSyncError] = useState<string | null>(null)
 
-  // Supabase board: when Supabase mode + connected, board is driven by supabaseTickets (0013)
-  const supabaseBoardActive =
-    ticketStoreMode === 'supabase' && supabaseConnectionStatus === 'connected'
+  // Supabase board: when connected, board is driven by supabaseTickets
+  const supabaseBoardActive = supabaseConnectionStatus === 'connected'
   const supabaseColumns = useMemo(() => {
     if (!supabaseBoardActive) return EMPTY_KANBAN_COLUMNS
     const byColumn: Record<string, { id: string; position: number }[]> = {
@@ -530,7 +527,7 @@ function App() {
     return map
   }, [supabaseTickets])
 
-  /** Connect to Supabase with given url/key; sets status, tickets, errors (0014). */
+  /** Connect to Supabase with given url/key; sets status, tickets, errors. */
   const connectSupabase = useCallback(async (url: string, key: string) => {
     setSupabaseLastError(null)
     setSupabaseNotInitialized(false)
@@ -583,26 +580,62 @@ function App() {
     }
   }, [])
 
-  // Auto-connect to Supabase from env on load (0014)
-  useEffect(() => {
-    const envUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
-    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
-    if (!envUrl || !envKey) return
-    setSupabaseProjectUrl(envUrl)
-    setSupabaseAnonKey(envKey)
-    connectSupabase(envUrl, envKey)
+  /** Connect to project folder: pick folder, read .env, connect to Supabase */
+  const handleConnectProjectFolder = useCallback(async () => {
+    setConnectError(null)
+    if (typeof window.showDirectoryPicker !== 'function') {
+      setConnectError('Folder picker not supported in this browser.')
+      return
+    }
+    try {
+      const folderHandle = await window.showDirectoryPicker({ mode: 'read' })
+      setProjectFolderHandle(folderHandle)
+      setProjectName(folderHandle.name)
+      
+      // Read .env file
+      let envFile: FileSystemFileHandle
+      try {
+        envFile = await folderHandle.getFileHandle('.env')
+      } catch {
+        setConnectError('No .env file found in selected folder.')
+        return
+      }
+      
+      const file = await envFile.getFile()
+      const envText = await file.text()
+      
+      // Parse .env for VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+      const urlMatch = envText.match(/^VITE_SUPABASE_URL\s*=\s*(.+)$/m)
+      const keyMatch = envText.match(/^VITE_SUPABASE_ANON_KEY\s*=\s*(.+)$/m)
+      
+      if (!urlMatch || !keyMatch) {
+        setConnectError('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env file.')
+        return
+      }
+      
+      const url = urlMatch[1].trim()
+      const key = keyMatch[1].trim()
+      
+      // Connect to Supabase with credentials from .env
+      await connectSupabase(url, key)
+      
+    } catch (e) {
+      const err = e as { name?: string }
+      if (err.name === 'AbortError') {
+        return
+      }
+      setConnectError(err instanceof Error ? err.message : 'Failed to connect to project folder.')
+    }
   }, [connectSupabase])
+
+  // Don't auto-connect anymore; user must select project folder
 
   const columnsForDisplay = supabaseBoardActive
     ? supabaseColumns
-    : ticketStoreConnected
-      ? ticketColumns
-      : columns
+    : EMPTY_KANBAN_COLUMNS
   const cardsForDisplay = supabaseBoardActive
     ? supabaseCards
-    : ticketStoreConnected
-      ? ticketCards
-      : cards
+    : {}
 
   useEffect(() => {
     if (!lastSavedTicketPath) return
@@ -1398,14 +1431,12 @@ function App() {
   const supabaseConfigMissing = !envUrl || !envKey
   const showConfigMissingError = supabaseConfigMissing && supabaseConnectionStatus !== 'connected'
 
-  // Retain for possible Debug-only Ticket Store (0014); satisfy noUnusedLocals
+  // Retain for possible Debug-only features; satisfy noUnusedLocals
   const _retain = [
     _SUPABASE_SETUP_SQL,
     _DraggableTicketItem,
     _DraggableSupabaseTicketItem,
-    _ticketStoreConnectMessage,
-    _ticketViewerLoading,
-    _setTicketStoreMode,
+    ticketStoreConnectMessage,
     _supabaseNotInitialized,
     _selectedSupabaseTicketId,
     _selectedSupabaseTicketContent,
@@ -1428,21 +1459,32 @@ function App() {
       <h1>Portfolio 2026</h1>
       <p className="subtitle">Project Zero: Kanban</p>
 
-      <header className="app-header-bar" aria-label="Project and connection">
-        <div className="project-dropdown-wrap">
-          <label htmlFor="project-select" className="project-label">Project</label>
-          <select
-            id="project-select"
-            className="project-select"
-            value={selectedProjectId}
-            onChange={(e) => setSelectedProjectId(e.target.value)}
-            aria-label="Project"
+      <header className="app-header-bar" aria-label="Project connection">
+        {!projectFolderHandle ? (
+          <button
+            type="button"
+            className="connect-project-btn"
+            onClick={handleConnectProjectFolder}
           >
-            {PROJECT_OPTIONS.map((opt) => (
-              <option key={opt.id} value={opt.id}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
+            Connect Project Folder
+          </button>
+        ) : (
+          <div className="project-info">
+            <span className="project-name">{projectName}</span>
+            <button
+              type="button"
+              className="disconnect-btn"
+              onClick={() => {
+                setProjectFolderHandle(null)
+                setProjectName(null)
+                setSupabaseConnectionStatus('disconnected')
+                setSupabaseTickets([])
+              }}
+            >
+              Disconnect
+            </button>
+          </div>
+        )}
         <button
           type="button"
           className="new-hal-project-btn"
@@ -1461,6 +1503,12 @@ function App() {
               : 'Disconnected'}
         </p>
       </header>
+
+      {connectError && (
+        <div className="config-missing-error" role="alert">
+          {connectError}
+        </div>
+      )}
 
       {newHalWizardOpen && (
         <div className="modal-backdrop" role="dialog" aria-label="New HAL project wizard">
@@ -1614,7 +1662,7 @@ function App() {
         </div>
       )}
 
-      {showConfigMissingError && (
+      {showConfigMissingError && !connectError && (
         <div className="config-missing-error" role="alert">
           Not connected: missing Supabase config
         </div>
