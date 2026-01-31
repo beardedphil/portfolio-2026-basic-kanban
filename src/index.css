@@ -49,6 +49,16 @@ h1 {
 .connect-project-btn:hover {
   background: #1565c0;
 }
+.embedded-status {
+  font-size: 0.9rem;
+  color: #666;
+  font-style: italic;
+}
+.embedded-status.connected {
+  color: #0a6b0a;
+  font-style: normal;
+  font-weight: 500;
+}
 .project-info {
   display: flex;
   align-items: center;

@@ -457,6 +457,9 @@ function App() {
   const [projectFolderHandle, setProjectFolderHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [projectName, setProjectName] = useState<string | null>(null)
   const [connectError, setConnectError] = useState<string | null>(null)
+  
+  // Detect if we're embedded in an iframe (HAL)
+  const isEmbedded = typeof window !== 'undefined' && window.self !== window.top
 
   // New HAL project wizard (v0 checklist-only)
   const [newHalWizardOpen, setNewHalWizardOpen] = useState(false)
@@ -628,7 +631,29 @@ function App() {
     }
   }, [connectSupabase])
 
-  // Don't auto-connect anymore; user must select project folder
+  // Listen for postMessage from HAL parent (when embedded in iframe)
+  useEffect(() => {
+    if (!isEmbedded) return
+    
+    const handleMessage = (event: MessageEvent) => {
+      // Only accept messages from parent origin
+      if (event.source !== window.parent) return
+      
+      const data = event.data as { type?: string; url?: string; key?: string }
+      
+      if (data.type === 'HAL_CONNECT_SUPABASE' && data.url && data.key) {
+        setProjectName('HAL-connected')
+        connectSupabase(data.url, data.key)
+      } else if (data.type === 'HAL_DISCONNECT') {
+        setProjectName(null)
+        setSupabaseConnectionStatus('disconnected')
+        setSupabaseTickets([])
+      }
+    }
+    
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [isEmbedded, connectSupabase])
 
   const columnsForDisplay = supabaseBoardActive
     ? supabaseColumns
@@ -1460,41 +1485,53 @@ function App() {
       <p className="subtitle">Project Zero: Kanban</p>
 
       <header className="app-header-bar" aria-label="Project connection">
-        {!projectFolderHandle ? (
-          <button
-            type="button"
-            className="connect-project-btn"
-            onClick={handleConnectProjectFolder}
-          >
-            Connect Project Folder
-          </button>
+        {isEmbedded ? (
+          // When embedded in HAL, show status only (HAL controls the connection)
+          projectName === 'HAL-connected' ? (
+            <span className="embedded-status connected">Connected via HAL</span>
+          ) : (
+            <span className="embedded-status">Use HAL to connect a project</span>
+          )
         ) : (
-          <div className="project-info">
-            <span className="project-name">{projectName}</span>
+          // When standalone, show connect button
+          <>
+            {!projectFolderHandle ? (
+              <button
+                type="button"
+                className="connect-project-btn"
+                onClick={handleConnectProjectFolder}
+              >
+                Connect Project Folder
+              </button>
+            ) : (
+              <div className="project-info">
+                <span className="project-name">{projectName}</span>
+                <button
+                  type="button"
+                  className="disconnect-btn"
+                  onClick={() => {
+                    setProjectFolderHandle(null)
+                    setProjectName(null)
+                    setSupabaseConnectionStatus('disconnected')
+                    setSupabaseTickets([])
+                  }}
+                >
+                  Disconnect
+                </button>
+              </div>
+            )}
             <button
               type="button"
-              className="disconnect-btn"
+              className="new-hal-project-btn"
               onClick={() => {
-                setProjectFolderHandle(null)
-                setProjectName(null)
-                setSupabaseConnectionStatus('disconnected')
-                setSupabaseTickets([])
+                setNewHalWizardOpen(true)
+                setNewHalReport(null)
               }}
             >
-              Disconnect
+              New HAL project
             </button>
-          </div>
+          </>
         )}
-        <button
-          type="button"
-          className="new-hal-project-btn"
-          onClick={() => {
-            setNewHalWizardOpen(true)
-            setNewHalReport(null)
-          }}
-        >
-          New HAL project
-        </button>
         <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
           {supabaseConnectionStatus === 'connecting'
             ? 'Connecting…'
