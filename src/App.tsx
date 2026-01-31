@@ -1481,20 +1481,13 @@ function App() {
 
   return (
     <>
-      <h1>Portfolio 2026</h1>
-      <p className="subtitle">Project Zero: Kanban</p>
+      {/* Hide title and header when embedded in HAL */}
+      {!isEmbedded && (
+        <>
+          <h1>Portfolio 2026</h1>
+          <p className="subtitle">Project Zero: Kanban</p>
 
-      <header className="app-header-bar" aria-label="Project connection">
-        {isEmbedded ? (
-          // When embedded in HAL, show status only (HAL controls the connection)
-          projectName === 'HAL-connected' ? (
-            <span className="embedded-status connected">Connected via HAL</span>
-          ) : (
-            <span className="embedded-status">Use HAL to connect a project</span>
-          )
-        ) : (
-          // When standalone, show connect button
-          <>
+          <header className="app-header-bar" aria-label="Project connection">
             {!projectFolderHandle ? (
               <button
                 type="button"
@@ -1530,16 +1523,16 @@ function App() {
             >
               New HAL project
             </button>
-          </>
-        )}
-        <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
-          {supabaseConnectionStatus === 'connecting'
-            ? 'Connecting…'
-            : supabaseConnectionStatus === 'connected'
-              ? 'Connected'
-              : 'Disconnected'}
-        </p>
-      </header>
+            <p className="connection-status" data-status={supabaseConnectionStatus} aria-live="polite">
+              {supabaseConnectionStatus === 'connecting'
+                ? 'Connecting…'
+                : supabaseConnectionStatus === 'connected'
+                  ? 'Connected'
+                  : 'Disconnected'}
+            </p>
+          </header>
+        </>
+      )}
 
       {connectError && (
         <div className="config-missing-error" role="alert">
