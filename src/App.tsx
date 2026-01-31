@@ -575,6 +575,8 @@ function App() {
       setSupabaseTickets((rows ?? []) as SupabaseTicketRow[])
       setSupabaseLastRefresh(new Date())
       setSupabaseConnectionStatus('connected')
+      setSupabaseProjectUrl(url)
+      setSupabaseAnonKey(key)
       localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ projectUrl: url, anonKey: key }))
     } catch (e) {
       setSupabaseLastError(e instanceof Error ? e.message : String(e))
@@ -657,10 +659,14 @@ function App() {
 
   const columnsForDisplay = supabaseBoardActive
     ? supabaseColumns
-    : EMPTY_KANBAN_COLUMNS
+    : ticketStoreConnected
+      ? ticketColumns
+      : columns
   const cardsForDisplay = supabaseBoardActive
     ? supabaseCards
-    : {}
+    : ticketStoreConnected
+      ? ticketCards
+      : cards
 
   useEffect(() => {
     if (!lastSavedTicketPath) return
@@ -811,26 +817,32 @@ function App() {
     }
   }, [supabaseProjectUrl, supabaseAnonKey])
 
-  /** Update one ticket's kanban fields in Supabase (0013). Returns true on success. */
+  /** Update one ticket's kanban fields in Supabase (0013). Returns { ok: true } or { ok: false, error: string }. */
   const updateSupabaseTicketKanban = useCallback(
     async (
       id: string,
       updates: { kanban_column_id?: string; kanban_position?: number; kanban_moved_at?: string }
-    ): Promise<boolean> => {
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
       const url = supabaseProjectUrl.trim()
       const key = supabaseAnonKey.trim()
-      if (!url || !key) return false
+      if (!url || !key) {
+        const err = 'Supabase not configured (URL/key missing). Connect first.'
+        setSupabaseLastError(err)
+        return { ok: false, error: err }
+      }
       try {
         const client = createClient(url, key)
         const { error } = await client.from('tickets').update(updates).eq('id', id)
         if (error) {
-          setSupabaseLastError(error.message ?? String(error))
-          return false
+          const msg = error.message ?? String(error)
+          setSupabaseLastError(msg)
+          return { ok: false, error: msg }
         }
-        return true
+        return { ok: true }
       } catch (e) {
-        setSupabaseLastError(e instanceof Error ? e.message : String(e))
-        return false
+        const msg = e instanceof Error ? e.message : String(e)
+        setSupabaseLastError(msg)
+        return { ok: false, error: msg }
       }
     },
     [supabaseProjectUrl, supabaseAnonKey]
@@ -1173,8 +1185,10 @@ function App() {
   const handleCreateColumn = useCallback(() => {
     const title = newColumnTitle.trim()
     if (!title) return
+    const cols = ticketStoreConnected ? ticketColumns : columns
+    const setCols = ticketStoreConnected ? setTicketColumns : setColumns
     const normalized = normalizeTitle(title)
-    const isDuplicate = columns.some((c) => normalizeTitle(c.title) === normalized)
+    const isDuplicate = cols.some((c) => normalizeTitle(c.title) === normalized)
     if (isDuplicate) {
       setAddColumnError('Column title must be unique.')
       addLog(`Column add blocked (duplicate): "${normalized}"`)
@@ -1182,11 +1196,11 @@ function App() {
     }
     setAddColumnError(null)
     const col: Column = { id: stableColumnId(), title, cardIds: [] }
-    setColumns((prev) => [...prev, col])
+    setCols((prev) => [...prev, col])
     setNewColumnTitle('')
     setShowAddColumnForm(false)
     addLog(`Column added: "${title}"`)
-  }, [newColumnTitle, columns, addLog])
+  }, [newColumnTitle, ticketStoreConnected, ticketColumns, columns, addLog])
 
   const handleCancelAddColumn = useCallback(() => {
     setNewColumnTitle('')
@@ -1310,12 +1324,12 @@ function App() {
           const movedAt = new Date().toISOString()
           for (let i = 0; i < newOrder.length; i++) {
             const id = newOrder[i]
-            const ok = await updateSupabaseTicketKanban(id, {
+            const result = await updateSupabaseTicketKanban(id, {
               kanban_position: i,
               ...(id === active.id ? { kanban_moved_at: movedAt } : {}),
             })
-            if (!ok) {
-              addLog(`Supabase reorder failed for ${id}`)
+            if (!result.ok) {
+              addLog(`Supabase reorder failed for ${id}: ${result.error}`)
               await refetchSupabaseTickets()
               return
             }
@@ -1323,16 +1337,16 @@ function App() {
           await refetchSupabaseTickets()
           addLog(`Supabase ticket ${active.id} reordered in ${sourceColumn.title}`)
         } else {
-          const ok = await updateSupabaseTicketKanban(String(active.id), {
+          const result = await updateSupabaseTicketKanban(String(active.id), {
             kanban_column_id: overColumn.id,
             kanban_position: overIndex,
             kanban_moved_at: new Date().toISOString(),
           })
-          if (ok) {
+          if (result.ok) {
             await refetchSupabaseTickets()
             addLog(`Supabase ticket ${active.id} moved to ${overColumn.title}`)
           } else {
-            addLog(`Supabase move failed for ${active.id}`)
+            addLog(`Supabase ticket ${active.id} move failed: ${result.error}`)
           }
         }
         return
@@ -1458,6 +1472,8 @@ function App() {
 
   // Retain for possible Debug-only features; satisfy noUnusedLocals
   const _retain = [
+    DEFAULT_COLUMNS,
+    INITIAL_CARDS,
     _SUPABASE_SETUP_SQL,
     _DraggableTicketItem,
     _DraggableSupabaseTicketItem,
@@ -1469,7 +1485,6 @@ function App() {
     _syncInProgress,
     _syncSummary,
     _syncProgressText,
-    _handleConnectProject,
     _handleSelectTicket,
     _handleRefreshTickets,
     _handleSupabaseConnect,
@@ -1706,7 +1721,7 @@ function App() {
         onDragEnd={handleDragEnd}
       >
         <section className="columns-section" aria-label="Columns">
-          {!ticketStoreConnected && !supabaseBoardActive && (
+          {!supabaseBoardActive && (
             <>
               <button
                 type="button"
@@ -1806,6 +1821,11 @@ function App() {
             <h3>Ticket Store</h3>
             <div className="build-info">
               <p>Store: Docs (read + write when connected with readwrite)</p>
+              {!ticketStoreConnected && (
+                <button type="button" onClick={_handleConnectProject}>
+                  Connect Ticket Store (docs)
+                </button>
+              )}
               <p>Connected: {String(ticketStoreConnected)}</p>
               <p>Last refresh: {ticketStoreLastRefresh ? ticketStoreLastRefresh.toISOString() : 'never'}</p>
               <p>Last error: {ticketStoreLastError ?? 'none'}</p>
