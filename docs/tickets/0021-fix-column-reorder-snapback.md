@@ -44,6 +44,7 @@ A human can drag a column header left/right to reorder columns, drop it, and the
 - Confirm which column list is authoritative for the current mode:
   - local columns vs Ticket Store columns vs Supabase columns.
 - Ensure `SortableContext` `items` matches the same source-of-truth list that `setCols` updates on drop.
+- Process note: keep follow-up commits for this work labeled with `0021` in the subject for traceability.
 
 ## Audit artifacts required (implementation agent)
 
