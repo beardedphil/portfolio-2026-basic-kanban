@@ -658,12 +658,12 @@ function App() {
   }, [isEmbedded, connectSupabase])
 
   const columnsForDisplay = supabaseBoardActive
-    ? [...supabaseColumns, ...columns]
+    ? supabaseColumns
     : ticketStoreConnected
       ? ticketColumns
       : columns
   const cardsForDisplay = supabaseBoardActive
-    ? { ...supabaseCards, ...cards }
+    ? supabaseCards
     : ticketStoreConnected
       ? ticketCards
       : cards
@@ -1722,49 +1722,51 @@ function App() {
         onDragEnd={handleDragEnd}
       >
         <section className="columns-section" aria-label="Columns">
-          <>
-            <button
-              type="button"
-              className="add-column-btn"
-              onClick={() => {
-                setAddColumnError(null)
-                setShowAddColumnForm(true)
-              }}
-              aria-expanded={showAddColumnForm}
-            >
-              Add column
-            </button>
-            {showAddColumnForm && (
-              <div className="add-column-form" role="form" aria-label="Add column form">
-                <input
-                  type="text"
-                  value={newColumnTitle}
-                  onChange={(e) => {
-                    setNewColumnTitle(e.target.value)
-                    setAddColumnError(null)
-                  }}
-                  placeholder="Column name"
-                  autoFocus
-                  aria-label="Column name"
-                  aria-invalid={!!addColumnError}
-                  aria-describedby={addColumnError ? 'add-column-error' : undefined}
-                />
-                {addColumnError && (
-                  <p id="add-column-error" className="add-column-error" role="alert">
-                    {addColumnError}
-                  </p>
-                )}
-                <div className="form-actions">
-                  <button type="button" onClick={handleCreateColumn}>
-                    Create
-                  </button>
-                  <button type="button" onClick={handleCancelAddColumn}>
-                    Cancel
-                  </button>
+          {!supabaseBoardActive && (
+            <>
+              <button
+                type="button"
+                className="add-column-btn"
+                onClick={() => {
+                  setAddColumnError(null)
+                  setShowAddColumnForm(true)
+                }}
+                aria-expanded={showAddColumnForm}
+              >
+                Add column
+              </button>
+              {showAddColumnForm && (
+                <div className="add-column-form" role="form" aria-label="Add column form">
+                  <input
+                    type="text"
+                    value={newColumnTitle}
+                    onChange={(e) => {
+                      setNewColumnTitle(e.target.value)
+                      setAddColumnError(null)
+                    }}
+                    placeholder="Column name"
+                    autoFocus
+                    aria-label="Column name"
+                    aria-invalid={!!addColumnError}
+                    aria-describedby={addColumnError ? 'add-column-error' : undefined}
+                  />
+                  {addColumnError && (
+                    <p id="add-column-error" className="add-column-error" role="alert">
+                      {addColumnError}
+                    </p>
+                  )}
+                  <div className="form-actions">
+                    <button type="button" onClick={handleCreateColumn}>
+                      Create
+                    </button>
+                    <button type="button" onClick={handleCancelAddColumn}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </>
+              )}
+            </>
+          )}
           <SortableContext
             items={columnsForDisplay.map((c) => c.id)}
             strategy={horizontalListSortingStrategy}
