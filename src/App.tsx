@@ -1401,15 +1401,57 @@ function App() {
       if (effectiveOverId == null) return
 
       if (isColumnId(active.id)) {
-        if (supabaseBoardActive) return // fixed To-do/Doing/Done, no column reorder
-        const cols = ticketStoreConnected ? ticketColumns : columns
+        // Resolve drop target to column id (over may be a card id when dropping over a column's body)
+        const overColumnId = isColumnId(effectiveOverId)
+          ? effectiveOverId
+          : findColumnByCardId(String(effectiveOverId))?.id
+        if (overColumnId == null) {
+          addLog('Column reorder skipped: drop target could not be resolved to a column')
+          return
+        }
+
+        if (supabaseBoardActive) {
+          const cols = supabaseColumns
+          const oldIndex = cols.findIndex((c) => c.id === active.id)
+          const newIndex = cols.findIndex((c) => c.id === overColumnId)
+          if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
+          const next = arrayMove(cols, oldIndex, newIndex)
+          const url = supabaseProjectUrl.trim()
+          const key = supabaseAnonKey.trim()
+          if (!url || !key) {
+            addLog('Column reorder failed: Supabase not configured')
+            return
+          }
+          try {
+            const client = createClient(url, key)
+            for (let i = 0; i < next.length; i++) {
+              const { error } = await client.from('kanban_columns').update({ position: i }).eq('id', next[i].id)
+              if (error) {
+                setSupabaseColumnsLastError(error.message ?? String(error))
+                addLog(`Column reorder failed: ${error.message ?? String(error)}`)
+                await refetchSupabaseTickets()
+                return
+              }
+            }
+            await refetchSupabaseTickets()
+            addLog(`Columns reordered: ${cols.map((c) => c.title).join(',')} -> ${next.map((c) => c.title).join(',')}`)
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            addLog(`Column reorder failed: ${msg}`)
+            await refetchSupabaseTickets()
+          }
+          return
+        }
+
         const setCols = ticketStoreConnected ? setTicketColumns : setColumns
-        const oldIndex = cols.findIndex((c) => c.id === active.id)
-        const newIndex = cols.findIndex((c) => c.id === effectiveOverId)
-        if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
-        const next = arrayMove(cols, oldIndex, newIndex)
-        setCols(next)
-        addLog(`Columns reordered: ${cols.map((c) => c.title).join(',')} -> ${next.map((c) => c.title).join(',')}`)
+        setCols((prev) => {
+          const oldIndex = prev.findIndex((c) => c.id === active.id)
+          const newIndex = prev.findIndex((c) => c.id === overColumnId)
+          if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return prev
+          const next = arrayMove(prev, oldIndex, newIndex)
+          addLog(`Columns reordered: ${prev.map((c) => c.title).join(',')} -> ${next.map((c) => c.title).join(',')}`)
+          return next
+        })
         return
       }
 
@@ -1593,6 +1635,9 @@ function App() {
       ticketColumns,
       columns,
       supabaseBoardActive,
+      supabaseColumns,
+      supabaseProjectUrl,
+      supabaseAnonKey,
       supabaseTickets,
       updateSupabaseTicketKanban,
       refetchSupabaseTickets,
