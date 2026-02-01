@@ -46,6 +46,23 @@ In the Debug panel, there is a new section "Cursor API Config" that shows:
 - Status should be "Not Configured" if env vars are missing, "Disconnected" if configured but not connected, "Connected" if connected
 - For now, this is a status display only - no actual API calls needed
 
+## QA / Testing
+
+**Branch:** `cursor/cursor-api-config-status-panel-5409`
+
+**Repository:** `portfolio-2026-basic-kanban`
+
+**How to test:**
+1. Checkout the branch: `git checkout cursor/cursor-api-config-status-panel-5409`
+2. Run `npm install` (if needed)
+3. Run `npm run dev`
+4. Open the app in browser
+5. Click **Debug** to open Debug panel
+6. Look for **"Cursor API Config"** section
+7. Follow verification steps in `docs/audit/0042-cursor-api-config-status-panel/verification.md`
+
+**Pull Request:** https://github.com/beardedphil/portfolio-2026-basic-kanban/pull/new/cursor/cursor-api-config-status-panel-5409
+
 ## Audit artifacts required (implementation agent)
 
 Create `docs/audit/0042-cursor-api-config-status-panel/` containing:
