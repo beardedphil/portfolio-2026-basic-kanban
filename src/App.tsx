@@ -522,6 +522,8 @@ function App() {
   const [_syncSummary, setSyncSummary] = useState<string | null>(null)
   const [_syncProgressText, setSyncProgressText] = useState<string | null>(null)
   const [supabaseLastSyncError, setSupabaseLastSyncError] = useState<string | null>(null)
+  // Cursor API config (0042)
+  const [cursorApiLastCheck, setCursorApiLastCheck] = useState<Date | null>(null)
 
   // Supabase board: when connected, board is driven by supabaseTickets + supabaseColumnsRows (0020)
   const supabaseBoardActive = supabaseConnectionStatus === 'connected'
@@ -1677,6 +1679,17 @@ function App() {
   const supabaseConfigMissing = !envUrl || !envKey
   const showConfigMissingError = supabaseConfigMissing && supabaseConnectionStatus !== 'connected'
 
+  // Cursor API config (0042); used for Debug panel status
+  const cursorApiUrl = (import.meta.env.VITE_CURSOR_API_URL ?? '').trim()
+  const cursorApiKey = (import.meta.env.VITE_CURSOR_API_KEY ?? '').trim()
+  const cursorApiConfigMissing = !cursorApiUrl || !cursorApiKey
+  const cursorApiConfigStatus = cursorApiConfigMissing ? 'Not Configured' : 'Disconnected'
+  
+  // Update last check time when component mounts or env changes
+  useEffect(() => {
+    setCursorApiLastCheck(new Date())
+  }, [cursorApiUrl, cursorApiKey])
+
   // Retain for possible Debug-only features; satisfy noUnusedLocals
   const _retain = [
     DEFAULT_COLUMNS,
@@ -2087,6 +2100,20 @@ function App() {
               </div>
             </section>
           )}
+          <section>
+            <h3>Cursor API Config</h3>
+            <div className="build-info">
+              {cursorApiConfigMissing && (
+                <p className="debug-env-missing" role="status">
+                  Missing env: {[!cursorApiUrl && 'VITE_CURSOR_API_URL', !cursorApiKey && 'VITE_CURSOR_API_KEY'].filter(Boolean).join(', ') || 'none'}
+                </p>
+              )}
+              <p>Status: {cursorApiConfigStatus}</p>
+              <p>API URL present: {String(!!cursorApiUrl)}</p>
+              <p>API Key present: {String(!!cursorApiKey)}</p>
+              <p>Last check: {cursorApiLastCheck ? cursorApiLastCheck.toISOString() : 'never'}</p>
+            </div>
+          </section>
           <section>
             <h3>Action Log</h3>
             <p className="action-log-summary">Total actions: {actionLog.length}</p>
