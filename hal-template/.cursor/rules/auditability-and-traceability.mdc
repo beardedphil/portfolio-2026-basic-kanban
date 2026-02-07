@@ -94,3 +94,13 @@ Note: Workspace-wide, the definition of “done” for **all agents** is enforce
 - The PM review must include:
   - **likelihood of success** (0–100%)
   - a ranked list of **potential failures** and how to diagnose them using **in-app** diagnostics
+
+## Failed Ticket Marking (when returning to To-do)
+
+**CRITICAL**: If a ticket fails verification/QA and is returned to To-do, the ticket file **MUST** be updated with all failure markers as specified in `.cursor/rules/bugfix-tracking.mdc`. The implementation agent must be able to immediately see:
+- That this is a failed/retry ticket (via title prefix `[FAILED]` or `[RETRY]`)
+- Why it failed (via prominent "⚠️ FAILURE HISTORY" section)
+- What was attempted before (via reference to previous audit artifacts)
+- What to do differently (via updated implementation notes)
+
+**Do not return a failed ticket to To-do without updating it with these markers.** An implementation agent should never pick up a failed ticket and think it's a fresh ticket.
