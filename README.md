@@ -29,15 +29,17 @@ npm run dev
 - `docs/` - Project documentation, tickets, and audit logs
 - `scripts/` - Utility scripts (e.g., `sync-tickets.js`)
 
-## Repository Split
+## Repository History
 
-This repository has been split from a larger monorepo structure into three separate repositories:
+This repository was originally a standalone kanban board application. It was later integrated into a monorepo/superrepo structure, and has now been restored to its independent state.
 
-1. **portfolio-2026-basic-kanban** (this repo) - The kanban board application
-2. **hal-template** - Template/scaffold for new projects (separate repo)
-3. **portfolio-2026-shared-docs** - Shared documentation and process templates (separate repo)
+The repository has been split from the larger monorepo structure into three separate repositories:
 
-Each repository is now independent and can be developed separately.
+1. **portfolio-2026-basic-kanban** (this repo) - The kanban board application ✅
+2. **hal-template** - Template/scaffold for new projects (separate repo) ⏳
+3. **portfolio-2026-shared-docs** - Shared documentation and process templates (separate repo) ⏳
+
+Each repository is now independent and can be developed separately. See `REPOSITORY_SPLIT.md` for more details.
 
 ## Scripts
 

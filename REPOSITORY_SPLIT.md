@@ -1,16 +1,18 @@
 # Repository Split Documentation
 
-This repository has been split from a larger monorepo structure into three separate, independent repositories.
+This repository (`portfolio-2026-basic-kanban`) was originally a standalone kanban board application. It was later integrated into a monorepo/superrepo structure, and is now being restored to its independent state. The repository has been split from the larger monorepo structure into three separate, independent repositories.
 
 ## The Three Repositories
 
-### 1. portfolio-2026-basic-kanban (This Repo)
+### 1. portfolio-2026-basic-kanban (This Repo) ✅
 - **Purpose**: The kanban board application
+- **Repository**: https://github.com/beardedphil/portfolio-2026-basic-kanban
 - **Contents**: 
   - React application (`src/`)
   - Project-specific documentation (`docs/`)
   - Build configuration and scripts
-- **Status**: ✅ Standalone and independent
+- **Status**: ✅ Restored to standalone and independent state
+- **Note**: This was the original standalone repo that got merged into a monorepo; it's now been restored to independence
 
 ### 2. hal-template (Separate Repo)
 - **Purpose**: Template/scaffold for creating new projects
