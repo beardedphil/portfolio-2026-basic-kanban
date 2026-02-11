@@ -1,21 +1,21 @@
 ---
-description: This repo uses HAL superrepo rules only
+description: Cursor rules for kanban board project
 alwaysApply: true
 ---
 
-# Authoritative Cursor Rules Live in the HAL Superrepo
+# Kanban Board Project Rules
 
-This repository is designed to be used as a **submodule** inside:
+This is a standalone kanban board application repository.
 
-- `portfolio-2026-hal/` (superrepo)
+## Project Structure
 
-## What to do
+- `src/` - React application source code
+- `docs/` - Project-specific documentation, tickets, and audit logs
+- `scripts/` - Utility scripts (e.g., sync-tickets.js)
 
-- Open your workspace at the **HAL superrepo root**: `portfolio-2026-hal/`.
-- The authoritative global agent rules live at: `portfolio-2026-hal/.cursor/rules/`.
+## Development
 
-## Do not edit rules here
-
-- This repo intentionally does **not** carry a full copy of `.cursor/rules/*.mdc` to prevent drift.
-- If you need to change rules, edit them in the HAL superrepo.
+- Run `npm run dev` to start the development server
+- Run `npm run build` to build for production
+- Run `npm run sync-tickets` to sync tickets between docs and Supabase
 

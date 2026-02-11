@@ -99,18 +99,6 @@ h1 {
 .connection-status[data-status="connecting"] {
   color: #888;
 }
-.new-hal-project-btn {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-  background: #333;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-}
-.new-hal-project-btn:hover {
-  background: #555;
-}
 .config-missing-error {
   padding: 0.75rem 1rem;
   background: #fef3cd;
