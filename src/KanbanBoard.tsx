@@ -27,6 +27,8 @@ export interface KanbanBoardProps {
   }) => void
   implementationAgentTicketId?: string | null
   qaAgentTicketId?: string | null
+  supabaseUrl?: string
+  supabaseAnonKey?: string
 }
 
 export function KanbanBoard({
@@ -41,6 +43,8 @@ export function KanbanBoard({
   onOpenChatAndSend,
   implementationAgentTicketId = null,
   qaAgentTicketId = null,
+  supabaseUrl,
+  supabaseAnonKey,
 }: KanbanBoardProps) {
   const value: HalKanbanContextValue = React.useMemo(
     () => ({
@@ -55,6 +59,8 @@ export function KanbanBoard({
       onOpenChatAndSend,
       implementationAgentTicketId,
       qaAgentTicketId,
+      supabaseUrl,
+      supabaseAnonKey,
     }),
     [
       tickets,
@@ -68,6 +74,8 @@ export function KanbanBoard({
       onOpenChatAndSend,
       implementationAgentTicketId,
       qaAgentTicketId,
+      supabaseUrl,
+      supabaseAnonKey,
     ]
   )
 

@@ -1847,7 +1847,7 @@ function App() {
       return
     }
     const { ticketId } = detailModal
-    // Library mode: body comes from HAL-passed data; no Supabase, no artifact fetch
+    // Library mode: body comes from HAL-passed data; fetch artifacts if HAL provides Supabase creds
     if (halCtx) {
       const row = sourceTickets.find((t) => t.pk === ticketId)
       if (row) {
@@ -1857,8 +1857,35 @@ function App() {
       }
       setDetailModalLoading(false)
       setDetailModalError(null)
-      setDetailModalArtifacts([])
-      setDetailModalArtifactsLoading(false)
+      const halSupabaseUrl = halCtx.supabaseUrl?.trim()
+      const halSupabaseKey = halCtx.supabaseAnonKey?.trim()
+      if (halSupabaseUrl && halSupabaseKey) {
+        setDetailModalArtifactsLoading(true)
+        ;(async () => {
+          try {
+            const client = createClient(halSupabaseUrl, halSupabaseKey)
+            const { data, error } = await client
+              .from('agent_artifacts')
+              .select('artifact_id, ticket_pk, repo_full_name, agent_type, title, body_md, created_at, updated_at')
+              .eq('ticket_pk', ticketId)
+              .order('created_at', { ascending: false })
+            if (error) {
+              console.warn('Failed to fetch artifacts (library mode):', error)
+              setDetailModalArtifacts([])
+            } else {
+              setDetailModalArtifacts((data ?? []) as SupabaseAgentArtifactRow[])
+            }
+          } catch (e) {
+            console.warn('Failed to fetch artifacts (library mode):', e)
+            setDetailModalArtifacts([])
+          } finally {
+            setDetailModalArtifactsLoading(false)
+          }
+        })()
+      } else {
+        setDetailModalArtifacts([])
+        setDetailModalArtifactsLoading(false)
+      }
       return
     }
     if (supabaseBoardActive) {

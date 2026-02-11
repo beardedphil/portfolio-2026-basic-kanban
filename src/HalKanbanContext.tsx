@@ -33,6 +33,10 @@ export interface HalKanbanContextValue {
   implementationAgentTicketId: string | null
   /** Ticket ID currently assigned to QA Agent (for UI indicator). */
   qaAgentTicketId: string | null
+  /** Supabase URL for artifact fetch (library mode). When provided, kanban fetches artifacts from agent_artifacts. */
+  supabaseUrl?: string
+  /** Supabase anon key for artifact fetch (library mode). */
+  supabaseAnonKey?: string
 }
 
 export const HalKanbanContext = createContext<HalKanbanContextValue | null>(null)
