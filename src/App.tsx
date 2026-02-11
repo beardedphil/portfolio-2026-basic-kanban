@@ -1868,8 +1868,18 @@ function App() {
           })
           .finally(() => setDetailModalArtifactsLoading(false))
       } else {
-        setDetailModalArtifacts([])
-        setDetailModalArtifactsLoading(false)
+        // Fallback when HAL has not passed the callback (e.g. older HAL bundle): call HAL API directly
+        setDetailModalArtifactsLoading(true)
+        fetch('/api/artifacts/get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ ticketPk: ticketId }),
+        })
+          .then((r) => r.json().catch(() => ({})))
+          .then((j: { artifacts?: SupabaseAgentArtifactRow[] }) => setDetailModalArtifacts(Array.isArray(j.artifacts) ? j.artifacts : []))
+          .catch(() => setDetailModalArtifacts([]))
+          .finally(() => setDetailModalArtifactsLoading(false))
       }
       return
     }
