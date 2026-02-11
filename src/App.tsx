@@ -1857,8 +1857,9 @@ function App() {
       }
       setDetailModalLoading(false)
       setDetailModalError(null)
-      const halSupabaseUrl = halCtx.supabaseUrl?.trim()
-      const halSupabaseKey = halCtx.supabaseAnonKey?.trim()
+      // Library mode: use HAL-passed creds or same app env (HAL and Kanban share VITE_ env when bundled)
+      const halSupabaseUrl = (halCtx.supabaseUrl?.trim() || (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()) || ''
+      const halSupabaseKey = (halCtx.supabaseAnonKey?.trim() || (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()) || ''
       if (halSupabaseUrl && halSupabaseKey) {
         setDetailModalArtifactsLoading(true)
         ;(async () => {
