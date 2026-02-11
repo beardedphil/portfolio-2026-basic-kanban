@@ -1865,17 +1865,31 @@ function App() {
         ;(async () => {
           try {
             const client = createClient(halSupabaseUrl, halSupabaseKey)
-            const { data, error } = await client
-              .from('agent_artifacts')
-              .select('artifact_id, ticket_pk, repo_full_name, agent_type, title, body_md, created_at, updated_at')
-              .eq('ticket_pk', ticketId)
-              .order('created_at', { ascending: false })
-            if (error) {
-              console.warn('Failed to fetch artifacts (library mode):', error)
-              setDetailModalArtifacts([])
-            } else {
-              setDetailModalArtifacts((data ?? []) as SupabaseAgentArtifactRow[])
+            let data: SupabaseAgentArtifactRow[] | null = null
+            const fetchArtifacts = async () => {
+              const { data: d, error } = await client
+                .from('agent_artifacts')
+                .select('artifact_id, ticket_pk, repo_full_name, agent_type, title, body_md, created_at, updated_at')
+                .eq('ticket_pk', ticketId)
+                .order('created_at', { ascending: false })
+              if (error) throw error
+              return (d ?? []) as SupabaseAgentArtifactRow[]
             }
+            data = await fetchArtifacts()
+            if (data.length === 0) {
+              try {
+                const syncRes = await fetch('/api/agent-runs/sync-artifacts', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({ ticketPk: ticketId }),
+                })
+                if (syncRes.ok) data = await fetchArtifacts()
+              } catch {
+                // ignore sync failure
+              }
+            }
+            setDetailModalArtifacts(data ?? [])
           } catch (e) {
             console.warn('Failed to fetch artifacts (library mode):', e)
             setDetailModalArtifacts([])
