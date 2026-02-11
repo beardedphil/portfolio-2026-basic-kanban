@@ -434,6 +434,98 @@ h1 {
   font-size: 0.9rem;
   color: #555;
 }
+.wizard-path-selection {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+.wizard-path-btn {
+  padding: 1.5rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, background 0.2s;
+}
+.wizard-path-btn:hover {
+  border-color: #1976d2;
+  background: #f5f5f5;
+}
+.wizard-path-btn strong {
+  display: block;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+  color: #1a1a1a;
+}
+.wizard-path-btn p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+.wizard-error {
+  padding: 0.75rem 1rem;
+  background: #fee;
+  border: 1px solid #fcc;
+  border-radius: 6px;
+  margin: 1rem 0;
+  color: #c33;
+}
+.instruction-sets-list {
+  margin: 1.5rem 0;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.instruction-set-item {
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  background: #fff;
+}
+.instruction-set-item details {
+  margin-top: 0.5rem;
+}
+.instruction-set-item summary {
+  cursor: pointer;
+  color: #1976d2;
+  font-size: 0.9rem;
+}
+.instruction-preview {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.scripts-list {
+  margin: 1.5rem 0;
+}
+.script-item {
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  background: #fff;
+}
+.wizard-complete {
+  padding: 1.5rem;
+  background: #e8f5e9;
+  border: 1px solid #4caf50;
+  border-radius: 8px;
+  margin: 1.5rem 0;
+}
+.wizard-complete p {
+  margin: 0.5rem 0;
+}
+.wizard-complete strong {
+  color: #2e7d32;
+}
 .wizard-error {
   margin: 0.5rem 0 0 0;
   font-size: 0.9rem;

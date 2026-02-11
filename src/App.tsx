@@ -61,6 +61,42 @@ type SupabaseKanbanColumnRow = {
   updated_at: string
 }
 
+/** Supabase projects table row (Project initialization wizard) */
+type SupabaseProjectRow = {
+  id: string
+  name: string
+  repo_url: string
+  tech_stack: string | null
+  build_command: string | null
+  test_command: string | null
+  lint_command: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Supabase project_instruction_sets table row (Project initialization wizard) */
+type SupabaseProjectInstructionSetRow = {
+  id: string
+  project_id: string
+  category: string
+  content: string
+  is_default: boolean
+  version: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Supabase project_scripts table row (Project initialization wizard) */
+type SupabaseProjectScriptRow = {
+  id: string
+  project_id: string
+  name: string
+  content: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
 /** Parsed ticket from docs/tickets/*.md for import */
 type ParsedDocTicket = {
   id: string
@@ -124,12 +160,262 @@ const _SUPABASE_KANBAN_COLUMNS_SETUP_SQL = `create table if not exists public.ka
   updated_at timestamptz not null default now()
 );`
 
+/** projects table (Project initialization wizard); run in Supabase SQL editor if missing */
+const _SUPABASE_PROJECTS_SETUP_SQL = `create table if not exists public.projects (
+  id text primary key,
+  name text not null,
+  repo_url text not null,
+  tech_stack text null,
+  build_command text null,
+  test_command text null,
+  lint_command text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);`
+
+/** project_instruction_sets table (Project initialization wizard); run in Supabase SQL editor if missing */
+const _SUPABASE_PROJECT_INSTRUCTION_SETS_SETUP_SQL = `create table if not exists public.project_instruction_sets (
+  id text primary key,
+  project_id text not null references public.projects(id) on delete cascade,
+  category text not null,
+  content text not null,
+  is_default boolean not null default false,
+  version text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);`
+
+/** project_scripts table (Project initialization wizard); run in Supabase SQL editor if missing */
+const _SUPABASE_PROJECT_SCRIPTS_SETUP_SQL = `create table if not exists public.project_scripts (
+  id text primary key,
+  project_id text not null references public.projects(id) on delete cascade,
+  name text not null,
+  content text not null,
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);`
+
 /** Default columns to seed when kanban_columns is empty (0020); backward-compatible IDs */
 const DEFAULT_KANBAN_COLUMNS_SEED = [
   { id: 'col-unassigned', title: 'Unassigned', position: 0 },
   { id: 'col-todo', title: 'To-do', position: 1 },
   { id: 'col-doing', title: 'Doing', position: 2 },
   { id: 'col-done', title: 'Done', position: 3 },
+] as const
+
+/** Default HAL instruction sets (migrated from .cursor/rules and docs/process) */
+const DEFAULT_INSTRUCTION_SETS = [
+  {
+    category: 'agent-rules',
+    name: 'auditability-and-traceability',
+    content: `---
+description: Auditability and traceability requirements for all agent work
+alwaysApply: true
+---
+
+# Auditability (Always On)
+
+For any coding task assigned to an implementation agent, the work must be **fully auditable**.
+
+## Standard Prompt Format
+
+- All new stories/tasks must be written as **tickets** in HAL's Supabase database.
+- The ticket itself is the canonical "prompt" (we do **not** create a separate prompt.md artifact).
+
+## Task ID Convention (Uniqueness)
+
+- Task IDs must be **sequential numbers**, zero-padded to 4 digits (e.g. \`0001\`, \`0002\`, ...).
+- Task IDs must remain **globally unique** within this project; they will be used as keys later.
+
+## Required Artifacts (per task)
+
+Create audit artifacts for each task:
+
+- Ticket in Supabase \`tickets\` table with:
+  - \`id\`, \`filename\`, \`title\`, \`body_md\` (includes acceptance criteria)
+- Audit folder (if applicable to project structure):
+  - \`plan.md\` - 3–10 bullets: intended approach and file touchpoints.
+  - \`worklog.md\` - Timestamped (rough) notes of what was done, in order.
+  - \`changed-files.md\` - List of files created/modified/deleted with 1–2 line purpose each.
+  - \`decisions.md\` - Any trade-offs/assumptions + why.
+  - \`verification.md\` - Human-verifiable steps **inside the app UI** (no console/devtools).
+
+## Ready-for-Verification (Commit + Push)
+
+- An implementation agent must **commit** all work for the ticket and **push** it to the remote before claiming the ticket is "done" or "ready for verification."
+- "Ready for verification" additionally requires a **clean + synced repo**:
+  - working tree is clean (no uncommitted changes, no untracked files created by the task)
+  - branch is synced with remote (not ahead/behind)
+- The completion message to the user/PM must include:
+  - the exact \`git status -sb\` output.
+
+## Commit message linkage
+
+- Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. \`feat(0010): ...\`, \`fix(0008): ...\`, \`docs(0009): ...\`).
+
+## In-App Trace Requirement
+
+- Any meaningful state change performed by the app should be visible in an **in-app debug/diagnostics UI** (not the console).
+- Errors should have an in-app representation suitable for a non-technical verifier.`,
+  },
+  {
+    category: 'agent-rules',
+    name: 'done-means-pushed',
+    content: `---
+description: "Done" requires commit + push (all agents)
+alwaysApply: true
+---
+
+# "Done" Means Committed + Pushed (All Agents)
+
+- **FORBIDDEN:** Sending a "done" or summary message while the working tree has uncommitted/unpushed changes. Commit and push first; then summarize.
+
+## Sequence: push first, then summarize
+
+- The moment you **think** you're done (implementation complete, audit written, etc.) is when you **commit and push** — not after you've already told the user.
+- **First:** commit all relevant changes and push to the remote.
+- **Then:** tell the user what was done (summary, verification, audit location). Do not give the long "here's what I did" report until after push.
+
+## Before you reply: the gate
+
+- **If you are about to send a message** that summarizes completed work, or that includes any of: "done", "complete", "ready", "looks good", "here's what I did", "Implementation complete", "Summary:", or similar — **STOP**.
+- **First** run: \`git status -sb\`. If there are any \`M\` (modified) or \`??\` (untracked) relevant to the task: run \`git add\`, \`git commit -m '...'\` (with ticket ID in subject), and \`git push\`. Then run \`git status -sb\` again.
+- **Only after** the working tree is clean and pushed may you send that message — and your message **must** start with the exact \`git status -sb\` output.
+
+## Requirements
+
+- If any agent believes a task/story is **done**, they must:
+  - **commit** all relevant changes, and
+  - **push** to the remote
+  before telling the user or project manager that it's done.
+- Agents must not delegate commit/push work to the user/PM (e.g., "after you commit and push…").
+  - If commit/push hasn't happened yet, the correct status is **"not ready for verification."**
+- "Done/ready" messages must include the exact \`git status -sb\` output showing the branch is synced and the working tree is clean.
+  - "Clean" means: **no modified files** and **no untracked files** (ignored build artifacts are fine).
+
+## Commit message linkage
+
+- Every commit that belongs to a ticket must include the ticket ID in the commit subject (e.g. \`feat(0010): ...\`, \`fix(0008): ...\`, \`docs(0009): ...\`).
+- If \`git status -sb\` is not clean/synced, the agent must say **"not ready for verification"** and keep working until it is.`,
+  },
+  {
+    category: 'agent-rules',
+    name: 'conversation-protocol',
+    content: `---
+description: Conversation protocol (one question when input needed)
+alwaysApply: true
+---
+
+# Conversation Protocol
+
+- You may do as much work as needed per message.
+- When you need user input, you may ask **at most one** question in that message.
+- Do not bundle multiple questions; spread them across messages.
+- When the user provides a new agent rule, record it in the project's instruction sets in HAL's database.
+- After updating any instruction set(s), explicitly state **which** instruction set(s) were updated.
+- **When you have finished a feature/task** (implementation + audit): before sending any summary or "done" message, follow **done-means-pushed**: run \`git add\`, \`git commit\`, \`git push\`, then include \`git status -sb\` in your reply. Do not delegate commit/push to the user.`,
+  },
+  {
+    category: 'agent-rules',
+    name: 'scope-discipline',
+    content: `---
+description: Prevent unrequested changes (scope discipline)
+alwaysApply: true
+---
+
+# Scope Discipline (No Unrequested Changes)
+
+- Implement **only** what the ticket requests.
+- Do not change styling/behavior "while you're here" unless:
+  - it is required to satisfy an acceptance criterion, OR
+  - it fixes a bug introduced by the task, AND it is documented.
+
+## Required documentation when deviations are unavoidable
+
+- If you must make a change not explicitly requested:
+  - add it to audit artifacts under **Unrequested changes (required)**:
+    - what changed
+    - why it was necessary
+    - how a human can verify it in the UI
+
+## Verification quality bar
+
+- Verification must include checks that confirm:
+  - the requested change works, AND
+  - adjacent UI did **not** regress (basic smoke checks).`,
+  },
+  {
+    category: 'agent-rules',
+    name: 'task-sizing-and-in-app-debugging',
+    content: `---
+description: Task sizing, verifiability, and in-app debugging (no console)
+alwaysApply: true
+---
+
+# Task Sizing + Verifiable Output
+
+- Every coding task assigned to an agent must be as small as possible.
+- The limiting factor on shrinking tasks/stories is that **each task must result in a human-verifiable change to the app**.
+- Verification must require **no external tools** (no terminal, no devtools console, no logs).
+- Prefer acceptance criteria phrased as: "A human can click/see X in the UI and confirm Y."
+
+# In-App Debugging Requirement
+
+- The app must include whatever **in-app debugging/diagnostics UI** we need to understand failures.
+- Do **not** rely on console output or logs for debugging during normal verification.`,
+  },
+  {
+    category: 'agent-rules',
+    name: 'bugfix-tracking',
+    content: `---
+description: Track QA failures and bugfix follow-ups
+alwaysApply: true
+---
+
+# Bugfix Tracking (QA Failures + Follow-ups)
+
+## When QA fails
+
+- If a ticket is "done" but fails QA, create a **new bugfix ticket** (next sequential ID).
+- The bugfix ticket must include:
+  - **Fixes**: the original ticket ID (e.g. \`Fixes: 0007\`)
+  - **QA failure summary**: what failed, in human terms
+  - **Category**: pick one: \`DnD\`, \`State\`, \`CSS\`, \`Build\`, \`Process\`, \`Other\`
+
+## Why
+
+- We want a clear, auditable trail of problem points (what keeps breaking and why).`,
+  },
+  {
+    category: 'process',
+    name: 'ticket-verification-rules',
+    content: `# Ticket Verification Rules
+
+This document defines how we decide a ticket is **properly completed**.
+
+## Definition of Done (DoD) — for every ticket
+
+- **Ticket exists**: Ticket in HAL's Supabase \`tickets\` table
+- **Ticket is committed**: the ticket exists in git history on the branch being verified (if applicable)
+- **Work is committed + pushed**:
+  - the implementation agent has committed all changes and pushed them to the remote before declaring "ready for verification"
+  - all commits for the ticket include the ticket ID in the commit subject (e.g. \`feat(0010): ...\`)
+  - the agent's completion message includes \`git status -sb\` output showing the branch is not ahead/behind and the working tree is clean
+- **Repo cleanliness**:
+  - no untracked files may remain from the task (unless explicitly ignored and documented as a generated artifact)
+- **UI-only verification steps**:
+  - verification must be written so a non-technical human can follow it
+  - no devtools / console / logs required for verification
+- **No "handoff chores"**:
+  - a ticket cannot be considered "ready for verification" if the agent tells the user/PM to perform git steps (commit/push) or to update audit artifacts
+  - the only allowed prerequisites are "open the app" (and, if unavoidable, starting the dev server)
+- **Acceptance criteria satisfied**:
+  - each checkbox in the ticket maps to one or more explicit steps in verification
+  - verification includes clear **pass/fail observations**
+- **In-app diagnostics updated as needed**:
+  - if something can fail, the app should provide enough in-app visibility to understand "what happened" without the console`,
+  },
 ] as const
 
 /** First 4 digits from filename (e.g. 0009-...md → 0009). Invalid → null. */
@@ -487,21 +773,21 @@ function App() {
   // Detect if we're embedded in an iframe (HAL)
   const isEmbedded = typeof window !== 'undefined' && window.self !== window.top
 
-  // New HAL project wizard (v0 checklist-only)
+  // New HAL project wizard (v1 with Supabase integration)
   const [newHalWizardOpen, setNewHalWizardOpen] = useState(false)
+  const [newHalWizardPath, setNewHalWizardPath] = useState<'empty' | 'existing' | null>(null)
   const [newHalProjectName, setNewHalProjectName] = useState('')
   const [newHalRepoUrl, setNewHalRepoUrl] = useState('')
-  const [newHalChecklist, setNewHalChecklist] = useState({
-    createdRepo: false,
-    copiedScaffold: false,
-    setEnv: false,
-    addedToHalSuperProject: false,
-  })
-  const [newHalReport, setNewHalReport] = useState<string | null>(null)
-  const [newHalTemplateRoot, setNewHalTemplateRoot] = useState<FileSystemDirectoryHandle | null>(null)
-  const [newHalTargetRoot, setNewHalTargetRoot] = useState<FileSystemDirectoryHandle | null>(null)
-  const [newHalBootstrapLog, setNewHalBootstrapLog] = useState<string | null>(null)
-  const [newHalBootstrapError, setNewHalBootstrapError] = useState<string | null>(null)
+  const [newHalTechStack, setNewHalTechStack] = useState('')
+  const [newHalBuildCommand, setNewHalBuildCommand] = useState('')
+  const [newHalTestCommand, setNewHalTestCommand] = useState('')
+  const [newHalLintCommand, setNewHalLintCommand] = useState('')
+  const [newHalProjectId, setNewHalProjectId] = useState<string | null>(null)
+  const [newHalInstructionSets, setNewHalInstructionSets] = useState<Array<{ id: string; category: string; name: string; content: string; confirmed: boolean }>>([])
+  const [newHalScripts, setNewHalScripts] = useState<Array<{ id: string; name: string; content: string; confirmed: boolean }>>([])
+  const [newHalWizardStep, setNewHalWizardStep] = useState<'path-selection' | 'project-info' | 'instruction-sets' | 'scripts' | 'complete'>('path-selection')
+  const [newHalWizardError, setNewHalWizardError] = useState<string | null>(null)
+  const [newHalWizardLoading, setNewHalWizardLoading] = useState(false)
   // Supabase (read-only v0)
   const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
@@ -1171,20 +1457,73 @@ function App() {
     addLog(next ? 'Debug toggled ON' : 'Debug toggled OFF')
   }, [debugOpen, addLog])
 
-  const generateNewHalReport = useCallback(() => {
-    const lines = [
-      'HAL project bootstrap report (wizard v0)',
-      `GeneratedAt: ${new Date().toISOString()}`,
-      `ProjectName: ${newHalProjectName || '(not set)'}`,
-      `RepoUrl: ${newHalRepoUrl || '(not set)'}`,
-      'Checklist:',
-      `- createdRepo: ${newHalChecklist.createdRepo}`,
-      `- copiedScaffold: ${newHalChecklist.copiedScaffold}`,
-      `- setEnv: ${newHalChecklist.setEnv}`,
-      `- addedToHalSuperProject: ${newHalChecklist.addedToHalSuperProject}`,
-    ]
-    setNewHalReport(lines.join('\n'))
-  }, [newHalChecklist, newHalProjectName, newHalRepoUrl])
+  /** Create a project in Supabase */
+  const createProjectInSupabase = useCallback(async (
+    name: string,
+    repoUrl: string,
+    techStack: string | null,
+    buildCommand: string | null,
+    testCommand: string | null,
+    lintCommand: string | null
+  ): Promise<{ ok: true; id: string } | { ok: false; error: string }> => {
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    if (!url || !key) {
+      return { ok: false, error: 'Supabase not connected. Connect to Supabase first.' }
+    }
+    try {
+      const client = createClient(url, key)
+      const projectId = `proj-${Date.now()}`
+      const { error } = await client.from('projects').insert({
+        id: projectId,
+        name,
+        repo_url: repoUrl,
+        tech_stack: techStack || null,
+        build_command: buildCommand || null,
+        test_command: testCommand || null,
+        lint_command: lintCommand || null,
+      })
+      if (error) {
+        return { ok: false, error: error.message ?? String(error) }
+      }
+      return { ok: true, id: projectId }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }, [supabaseProjectUrl, supabaseAnonKey])
+
+  /** Create default instruction sets for a project */
+  const createDefaultInstructionSets = useCallback(async (
+    projectId: string
+  ): Promise<{ ok: true; instructionSets: Array<{ id: string; category: string; name: string; content: string }> } | { ok: false; error: string }> => {
+    const url = supabaseProjectUrl.trim()
+    const key = supabaseAnonKey.trim()
+    if (!url || !key) {
+      return { ok: false, error: 'Supabase not connected.' }
+    }
+    try {
+      const client = createClient(url, key)
+      const instructionSets: Array<{ id: string; category: string; name: string; content: string }> = []
+      for (const inst of DEFAULT_INSTRUCTION_SETS) {
+        const id = `inst-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const { error } = await client.from('project_instruction_sets').insert({
+          id,
+          project_id: projectId,
+          category: inst.category,
+          content: inst.content,
+          is_default: true,
+          version: '1.0.0',
+        })
+        if (error) {
+          return { ok: false, error: `Failed to create instruction set ${inst.name}: ${error.message}` }
+        }
+        instructionSets.push({ id, category: inst.category, name: inst.name, content: inst.content })
+      }
+      return { ok: true, instructionSets }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }, [supabaseProjectUrl, supabaseAnonKey])
 
   const pickWizardFolder = useCallback(async (mode: 'read' | 'readwrite') => {
     if (typeof window.showDirectoryPicker !== 'function') {
@@ -1768,17 +2107,330 @@ function App() {
         <div className="modal-backdrop" role="dialog" aria-label="New HAL project wizard">
           <div className="modal">
             <div className="modal-header">
-              <h2 className="modal-title">New HAL project (wizard v0)</h2>
-              <button type="button" className="modal-close" onClick={() => setNewHalWizardOpen(false)}>
+              <h2 className="modal-title">Initialize HAL Project</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => {
+                  setNewHalWizardOpen(false)
+                  setNewHalWizardPath(null)
+                  setNewHalWizardStep('path-selection')
+                  setNewHalProjectName('')
+                  setNewHalRepoUrl('')
+                  setNewHalTechStack('')
+                  setNewHalBuildCommand('')
+                  setNewHalTestCommand('')
+                  setNewHalLintCommand('')
+                  setNewHalProjectId(null)
+                  setNewHalInstructionSets([])
+                  setNewHalScripts([])
+                  setNewHalWizardError(null)
+                }}
+              >
                 Close
               </button>
             </div>
 
-            <p className="modal-subtitle">
-              This is a checklist-only wizard. It helps you set up a new repo without losing the rules/docs/process we learned in Project 0.
-            </p>
+            {newHalWizardStep === 'path-selection' && (
+              <>
+                <p className="modal-subtitle">Choose your project type:</p>
+                <div className="wizard-path-selection">
+                  <button
+                    type="button"
+                    className="wizard-path-btn"
+                    onClick={() => {
+                      setNewHalWizardPath('empty')
+                      setNewHalWizardStep('project-info')
+                    }}
+                  >
+                    <strong>Empty Repository</strong>
+                    <p>Start with a fresh, empty repository</p>
+                  </button>
+                  <button
+                    type="button"
+                    className="wizard-path-btn"
+                    onClick={() => {
+                      setNewHalWizardPath('existing')
+                      setNewHalWizardStep('project-info')
+                    }}
+                  >
+                    <strong>Existing Non-HAL Project</strong>
+                    <p>Connect HAL to an existing project repository</p>
+                  </button>
+                </div>
+              </>
+            )}
 
-            <div className="modal-grid">
+            {newHalWizardStep === 'project-info' && (
+              <>
+                <p className="modal-subtitle">Project Information</p>
+                {newHalWizardError && (
+                  <div className="wizard-error" role="alert">
+                    {newHalWizardError}
+                  </div>
+                )}
+                <div className="modal-grid">
+                  <label className="field">
+                    <span className="field-label">Project name *</span>
+                    <input
+                      className="field-input"
+                      value={newHalProjectName}
+                      onChange={(e) => setNewHalProjectName(e.target.value)}
+                      placeholder="my-project"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Repository URL *</span>
+                    <input
+                      className="field-input"
+                      value={newHalRepoUrl}
+                      onChange={(e) => setNewHalRepoUrl(e.target.value)}
+                      placeholder="https://github.com/you/my-project"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Tech stack (optional)</span>
+                    <input
+                      className="field-input"
+                      value={newHalTechStack}
+                      onChange={(e) => setNewHalTechStack(e.target.value)}
+                      placeholder="react-vite-ts, python-django, go, etc."
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Build command (optional)</span>
+                    <input
+                      className="field-input"
+                      value={newHalBuildCommand}
+                      onChange={(e) => setNewHalBuildCommand(e.target.value)}
+                      placeholder="npm run dev"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Test command (optional)</span>
+                    <input
+                      className="field-input"
+                      value={newHalTestCommand}
+                      onChange={(e) => setNewHalTestCommand(e.target.value)}
+                      placeholder="npm test"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Lint command (optional)</span>
+                    <input
+                      className="field-input"
+                      value={newHalLintCommand}
+                      onChange={(e) => setNewHalLintCommand(e.target.value)}
+                      placeholder="npm run lint"
+                    />
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    onClick={() => setNewHalWizardStep('path-selection')}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!newHalProjectName || !newHalRepoUrl || newHalWizardLoading}
+                    onClick={async () => {
+                      if (!newHalProjectName || !newHalRepoUrl) return
+                      setNewHalWizardError(null)
+                      setNewHalWizardLoading(true)
+                      const result = await createProjectInSupabase(
+                        newHalProjectName,
+                        newHalRepoUrl,
+                        newHalTechStack || null,
+                        newHalBuildCommand || null,
+                        newHalTestCommand || null,
+                        newHalLintCommand || null
+                      )
+                      if (!result.ok) {
+                        setNewHalWizardError(result.error)
+                        setNewHalWizardLoading(false)
+                        return
+                      }
+                      setNewHalProjectId(result.id)
+                      const instResult = await createDefaultInstructionSets(result.id)
+                      if (!instResult.ok) {
+                        setNewHalWizardError(instResult.error)
+                        setNewHalWizardLoading(false)
+                        return
+                      }
+                      setNewHalInstructionSets(
+                        instResult.instructionSets.map((inst) => ({
+                          ...inst,
+                          confirmed: false,
+                        }))
+                      )
+                      setNewHalWizardStep('instruction-sets')
+                      setNewHalWizardLoading(false)
+                    }}
+                  >
+                    {newHalWizardLoading ? 'Creating...' : 'Next: Review Instruction Sets'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {newHalWizardStep === 'instruction-sets' && (
+              <>
+                <p className="modal-subtitle">
+                  Review and confirm HAL's instruction sets. You can use HAL's defaults or create project-specific ones.
+                </p>
+                {newHalWizardError && (
+                  <div className="wizard-error" role="alert">
+                    {newHalWizardError}
+                  </div>
+                )}
+                <div className="instruction-sets-list">
+                  {newHalInstructionSets.map((inst) => (
+                    <div key={inst.id} className="instruction-set-item">
+                      <label className="check">
+                        <input
+                          type="checkbox"
+                          checked={inst.confirmed}
+                          onChange={(e) => {
+                            setNewHalInstructionSets((prev) =>
+                              prev.map((i) =>
+                                i.id === inst.id ? { ...i, confirmed: e.target.checked } : i
+                              )
+                            )
+                          }}
+                        />
+                        <span>
+                          <strong>{inst.name}</strong> ({inst.category})
+                        </span>
+                      </label>
+                      <details>
+                        <summary>Preview content</summary>
+                        <pre className="instruction-preview">{inst.content.slice(0, 500)}...</pre>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    onClick={() => setNewHalWizardStep('project-info')}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      // For now, skip scripts step and go to complete
+                      setNewHalWizardStep('complete')
+                    }}
+                  >
+                    Next: Review Scripts
+                  </button>
+                </div>
+              </>
+            )}
+
+            {newHalWizardStep === 'scripts' && (
+              <>
+                <p className="modal-subtitle">
+                  Review and confirm HAL's scripts. You can use HAL's defaults or create project-specific ones.
+                </p>
+                {newHalScripts.length === 0 ? (
+                  <p>No scripts to review. HAL will use default scripts.</p>
+                ) : (
+                  <div className="scripts-list">
+                    {newHalScripts.map((script) => (
+                      <div key={script.id} className="script-item">
+                        <label className="check">
+                          <input
+                            type="checkbox"
+                            checked={script.confirmed}
+                            onChange={(e) => {
+                              setNewHalScripts((prev) =>
+                                prev.map((s) =>
+                                  s.id === script.id ? { ...s, confirmed: e.target.checked } : s
+                                )
+                              )
+                            }}
+                          />
+                          <span>
+                            <strong>{script.name}</strong>
+                          </span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    onClick={() => setNewHalWizardStep('instruction-sets')}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => setNewHalWizardStep('complete')}
+                  >
+                    Complete
+                  </button>
+                </div>
+              </>
+            )}
+
+            {newHalWizardStep === 'complete' && (
+              <>
+                <p className="modal-subtitle">Project initialized successfully!</p>
+                <div className="wizard-complete">
+                  <p>
+                    <strong>Project ID:</strong> {newHalProjectId}
+                  </p>
+                  <p>
+                    <strong>Project Name:</strong> {newHalProjectName}
+                  </p>
+                  <p>
+                    <strong>Repository URL:</strong> {newHalRepoUrl}
+                  </p>
+                  <p>
+                    HAL is now ready to manage this project. You can create tickets, implement features, and track progress.
+                  </p>
+                </div>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      setNewHalWizardOpen(false)
+                      setNewHalWizardPath(null)
+                      setNewHalWizardStep('path-selection')
+                      setNewHalProjectName('')
+                      setNewHalRepoUrl('')
+                      setNewHalTechStack('')
+                      setNewHalBuildCommand('')
+                      setNewHalTestCommand('')
+                      setNewHalLintCommand('')
+                      setNewHalProjectId(null)
+                      setNewHalInstructionSets([])
+                      setNewHalScripts([])
+                      setNewHalWizardError(null)
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Old wizard code removed - using new wizard above */}
+      {false && (
+        <div className="modal-grid">
               <label className="field">
                 <span className="field-label">Project name</span>
                 <input
