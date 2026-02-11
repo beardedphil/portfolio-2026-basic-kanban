@@ -1847,7 +1847,7 @@ function App() {
       return
     }
     const { ticketId } = detailModal
-    // Library mode: body comes from HAL-passed data; fetch artifacts if HAL provides Supabase creds
+    // Library mode: body from HAL-passed data; artifacts via HAL callback (HAL owns DB)
     if (halCtx) {
       const row = sourceTickets.find((t) => t.pk === ticketId)
       if (row) {
@@ -1857,51 +1857,16 @@ function App() {
       }
       setDetailModalLoading(false)
       setDetailModalError(null)
-      // Library mode: use HAL-passed creds or same app env (HAL and Kanban share VITE_ env when bundled)
-      const halSupabaseUrl = (halCtx.supabaseUrl?.trim() || (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()) || ''
-      const halSupabaseKey = (halCtx.supabaseAnonKey?.trim() || (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()) || ''
-      if (halSupabaseUrl && halSupabaseKey) {
+      if (halCtx.fetchArtifactsForTicket) {
         setDetailModalArtifactsLoading(true)
-        ;(async () => {
-          try {
-            const client = createClient(halSupabaseUrl, halSupabaseKey)
-            let data: SupabaseAgentArtifactRow[] | null = null
-            const fetchArtifacts = async () => {
-              const { data: d, error } = await client
-                .from('agent_artifacts')
-                .select('artifact_id, ticket_pk, repo_full_name, agent_type, title, body_md, created_at, updated_at')
-                .eq('ticket_pk', ticketId)
-                .order('created_at', { ascending: false })
-              if (error) throw error
-              return (d ?? []) as SupabaseAgentArtifactRow[]
-            }
-            data = await fetchArtifacts()
-            if (data.length === 0) {
-              try {
-                const syncRes = await fetch('/api/agent-runs/sync-artifacts', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'include',
-                  body: JSON.stringify({ ticketPk: ticketId }),
-                })
-                const syncJson = await syncRes.json().catch(() => ({}))
-                if (syncRes.ok && Array.isArray(syncJson.artifacts) && syncJson.artifacts.length > 0) {
-                  data = syncJson.artifacts as SupabaseAgentArtifactRow[]
-                } else if (syncRes.ok) {
-                  data = await fetchArtifacts()
-                }
-              } catch {
-                // ignore sync failure
-              }
-            }
-            setDetailModalArtifacts(data ?? [])
-          } catch (e) {
+        halCtx
+          .fetchArtifactsForTicket(ticketId)
+          .then((data) => setDetailModalArtifacts(data ?? []))
+          .catch((e) => {
             console.warn('Failed to fetch artifacts (library mode):', e)
             setDetailModalArtifacts([])
-          } finally {
-            setDetailModalArtifactsLoading(false)
-          }
-        })()
+          })
+          .finally(() => setDetailModalArtifactsLoading(false))
       } else {
         setDetailModalArtifacts([])
         setDetailModalArtifactsLoading(false)

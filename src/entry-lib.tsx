@@ -11,4 +11,5 @@ export {
   type KanbanTicketRow,
   type KanbanColumnRow,
   type KanbanAgentRunRow,
+  type KanbanAgentArtifactRow,
 } from './KanbanBoard'

@@ -9,7 +9,7 @@ import type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow } from './type
 import KanbanBoardInner from './App'
 
 export type { HalKanbanContextValue, HalChatTarget } from './HalKanbanContext'
-export type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow } from './types'
+export type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow, KanbanAgentArtifactRow } from './types'
 
 export interface KanbanBoardProps {
   tickets: KanbanTicketRow[]
@@ -27,8 +27,8 @@ export interface KanbanBoardProps {
   }) => void
   implementationAgentTicketId?: string | null
   qaAgentTicketId?: string | null
-  supabaseUrl?: string
-  supabaseAnonKey?: string
+  /** HAL fetches artifacts from DB; called when ticket detail opens. */
+  fetchArtifactsForTicket?: (ticketPk: string) => Promise<import('./types').KanbanAgentArtifactRow[]>
 }
 
 export function KanbanBoard({
@@ -43,8 +43,7 @@ export function KanbanBoard({
   onOpenChatAndSend,
   implementationAgentTicketId = null,
   qaAgentTicketId = null,
-  supabaseUrl,
-  supabaseAnonKey,
+  fetchArtifactsForTicket,
 }: KanbanBoardProps) {
   const value: HalKanbanContextValue = React.useMemo(
     () => ({
@@ -59,8 +58,7 @@ export function KanbanBoard({
       onOpenChatAndSend,
       implementationAgentTicketId,
       qaAgentTicketId,
-      supabaseUrl,
-      supabaseAnonKey,
+      fetchArtifactsForTicket,
     }),
     [
       tickets,
@@ -74,8 +72,7 @@ export function KanbanBoard({
       onOpenChatAndSend,
       implementationAgentTicketId,
       qaAgentTicketId,
-      supabaseUrl,
-      supabaseAnonKey,
+      fetchArtifactsForTicket,
     ]
   )
 

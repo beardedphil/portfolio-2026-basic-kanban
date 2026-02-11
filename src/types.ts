@@ -39,3 +39,15 @@ export interface KanbanAgentRunRow {
   created_at: string
   updated_at: string
 }
+
+/** Agent artifact row (matches Supabase agent_artifacts table, 0082). Used when HAL fetches artifacts and passes to Kanban. */
+export interface KanbanAgentArtifactRow {
+  artifact_id: string
+  ticket_pk: string
+  repo_full_name: string
+  agent_type: 'implementation' | 'qa' | 'human-in-the-loop' | 'other'
+  title: string
+  body_md: string
+  created_at: string
+  updated_at: string
+}

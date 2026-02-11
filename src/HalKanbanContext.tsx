@@ -5,7 +5,7 @@
  */
 
 import { createContext } from 'react'
-import type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow } from './types'
+import type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow, KanbanAgentArtifactRow } from './types'
 
 /** Chat target for one-click work buttons (matches HAL's ChatTarget). */
 export type HalChatTarget = 'project-manager' | 'implementation-agent' | 'qa-agent' | 'standup'
@@ -33,10 +33,8 @@ export interface HalKanbanContextValue {
   implementationAgentTicketId: string | null
   /** Ticket ID currently assigned to QA Agent (for UI indicator). */
   qaAgentTicketId: string | null
-  /** Supabase URL for artifact fetch (library mode). When provided, kanban fetches artifacts from agent_artifacts. */
-  supabaseUrl?: string
-  /** Supabase anon key for artifact fetch (library mode). */
-  supabaseAnonKey?: string
+  /** HAL fetches artifacts from DB and returns them. Called when ticket detail opens so Kanban can show artifacts. */
+  fetchArtifactsForTicket?: (ticketPk: string) => Promise<KanbanAgentArtifactRow[]>
 }
 
 export const HalKanbanContext = createContext<HalKanbanContextValue | null>(null)
