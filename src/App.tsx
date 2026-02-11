@@ -123,7 +123,7 @@ const DEFAULT_KANBAN_COLUMNS_SEED = [
   { id: 'col-unassigned', title: 'Unassigned', position: 0 },
   { id: 'col-todo', title: 'To-do', position: 1 },
   { id: 'col-doing', title: 'Doing', position: 2 },
-  { id: 'col-qa', title: 'QA', position: 3 },
+  { id: 'col-qa', title: 'Ready for QA', position: 3 },
   { id: 'col-human-in-the-loop', title: 'Human in the Loop', position: 4 },
   { id: 'col-process-review', title: 'Process Review', position: 5 },
   { id: 'col-done', title: 'Done', position: 6 },
@@ -222,14 +222,14 @@ const DEFAULT_COLUMNS: Column[] = [
   { id: 'col-unassigned', title: 'Unassigned', cardIds: [] },
   { id: 'col-todo', title: 'To-do', cardIds: ['c-1', 'c-2', 'c-3'] },
   { id: 'col-doing', title: 'Doing', cardIds: ['c-4', 'c-5', 'c-6'] },
-  { id: 'col-qa', title: 'QA', cardIds: [] },
+  { id: 'col-qa', title: 'Ready for QA', cardIds: [] },
   { id: 'col-human-in-the-loop', title: 'Human in the Loop', cardIds: [] },
   { id: 'col-process-review', title: 'Process Review', cardIds: [] },
   { id: 'col-done', title: 'Done', cardIds: ['c-7', 'c-8', 'c-9'] },
   { id: 'col-wont-implement', title: 'Will Not Implement', cardIds: [] },
 ]
 
-/** Unassigned, To-do, Doing, QA, Human in the Loop, Process Review, Done, Will Not Implement; tickets with null or col-unassigned go in Unassigned */
+/** Unassigned, To-do, Doing, Ready for QA, Human in the Loop, Process Review, Done, Will Not Implement; tickets with null or col-unassigned go in Unassigned */
 const KANBAN_COLUMN_IDS = [
   'col-unassigned',
   'col-todo',
@@ -247,12 +247,15 @@ function canonicalizeColumnRows(
 ): SupabaseKanbanColumnRow[] {
   const canonicalOrder = KANBAN_COLUMN_IDS as unknown as string[]
   const filtered = rows.filter((c) => canonicalOrder.includes(c.id))
+  const titleById: Record<string, string> = {
+    'col-qa': 'Ready for QA',
+  }
   return canonicalOrder.map((id, i) => {
     const row = filtered.find((c) => c.id === id)
     return (
       row ?? {
         id,
-        title: id.replace('col-', '').replace(/-/g, ' '),
+        title: titleById[id] ?? id.replace('col-', '').replace(/-/g, ' '),
         position: i,
         created_at: '',
         updated_at: '',
@@ -264,7 +267,7 @@ const EMPTY_KANBAN_COLUMNS: Column[] = [
   { id: 'col-unassigned', title: 'Unassigned', cardIds: [] },
   { id: 'col-todo', title: 'To-do', cardIds: [] },
   { id: 'col-doing', title: 'Doing', cardIds: [] },
-  { id: 'col-qa', title: 'QA', cardIds: [] },
+  { id: 'col-qa', title: 'Ready for QA', cardIds: [] },
   { id: 'col-human-in-the-loop', title: 'Human in the Loop', cardIds: [] },
   { id: 'col-process-review', title: 'Process Review', cardIds: [] },
   { id: 'col-done', title: 'Done', cardIds: [] },
