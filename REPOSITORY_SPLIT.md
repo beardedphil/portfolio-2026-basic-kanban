@@ -1,8 +1,17 @@
 # Repository Split Documentation
 
-This repository (`portfolio-2026-basic-kanban`) was originally a standalone kanban board application. It was later integrated into a monorepo/superrepo structure, and is now being restored to its independent state. The repository has been split from the larger monorepo structure into three separate, independent repositories.
+This repository (`portfolio-2026-basic-kanban`) was originally a standalone kanban board application. It was later integrated into a monorepo/superrepo structure (HAL), and is now being restored to its independent state.
 
-## The Three Repositories
+## Two Subrepos Being Restored
+
+There are **two subrepos** that need to be restored to their independent states:
+
+1. **portfolio-2026-basic-kanban** (this repo) - ✅ Restored
+2. **portfolio-2026-hal-agents** - ⏳ Needs restoration to https://github.com/beardedphil/portfolio-2026-hal-agents
+
+The HAL template and shared docs can continue to live in the HAL superrepo for now.
+
+## The Two Subrepos
 
 ### 1. portfolio-2026-basic-kanban (This Repo) ✅
 - **Purpose**: The kanban board application
@@ -14,31 +23,20 @@ This repository (`portfolio-2026-basic-kanban`) was originally a standalone kanb
 - **Status**: ✅ Restored to standalone and independent state
 - **Note**: This was the original standalone repo that got merged into a monorepo; it's now been restored to independence
 
-### 2. hal-template (Separate Repo)
-- **Purpose**: Template/scaffold for creating new projects
-- **Contents**: 
-  - `.cursor/rules/` - Cursor agent rules
-  - `docs/templates/` - Ticket and review templates
-  - `docs/process/` - Process documentation
-  - `scripts/sync-tickets.js` - Ticket sync script
-  - `.env.example` - Environment variable template
-- **Status**: ⚠️ Needs to be extracted into its own repository
+### 2. portfolio-2026-hal-agents ⏳
+- **Purpose**: Agent implementations used by HAL
+- **Repository**: https://github.com/beardedphil/portfolio-2026-hal-agents
+- **Status**: ⚠️ Needs to be restored to standalone state
 - **Action Required**: 
-  1. Create a new repository named `hal-template`
-  2. Copy the contents that were previously in `hal-template/` directory
-  3. Initialize as a standalone git repository
+  1. Remove any superrepo/submodule references
+  2. Remove any dependencies on HAL superrepo structure
+  3. Update documentation to reflect standalone state
+  4. Ensure it can work independently
+  5. Similar cleanup as done for kanban repo
 
-### 3. portfolio-2026-shared-docs (Separate Repo)
-- **Purpose**: Shared documentation and process templates
-- **Contents**:
-  - Reusable documentation templates
-  - Process documentation that applies across projects
-  - Shared Cursor rules (if needed)
-- **Status**: ⚠️ Needs to be created
-- **Action Required**:
-  1. Create a new repository named `portfolio-2026-shared-docs`
-  2. Extract shared templates and process docs from this repo
-  3. Initialize as a standalone git repository
+## HAL Template & Shared Docs
+
+The HAL template and shared documentation can continue to live in the HAL superrepo for now. They don't need to be extracted into separate repositories at this time.
 
 ## What Was Removed
 
@@ -58,6 +56,8 @@ From this repository:
 ## Next Steps
 
 1. ✅ Kanban app repo cleaned up (this repo)
-2. ⏳ Extract `hal-template` into its own repository
-3. ⏳ Create `portfolio-2026-shared-docs` repository
-4. ⏳ Update any cross-repo references if needed
+2. ⏳ Restore `portfolio-2026-hal-agents` to standalone state
+   - Remove superrepo/submodule references
+   - Remove HAL superrepo dependencies
+   - Update documentation
+   - Ensure independence
