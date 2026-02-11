@@ -1884,7 +1884,12 @@ function App() {
                   credentials: 'include',
                   body: JSON.stringify({ ticketPk: ticketId }),
                 })
-                if (syncRes.ok) data = await fetchArtifacts()
+                const syncJson = await syncRes.json().catch(() => ({}))
+                if (syncRes.ok && Array.isArray(syncJson.artifacts) && syncJson.artifacts.length > 0) {
+                  data = syncJson.artifacts as SupabaseAgentArtifactRow[]
+                } else if (syncRes.ok) {
+                  data = await fetchArtifacts()
+                }
               } catch {
                 // ignore sync failure
               }
