@@ -144,15 +144,33 @@ function extractFeatureBranch(bodyMd: string | null): string | null {
   return branchMatch ? branchMatch[1].trim() : null
 }
 
-/** Strip embedded QA blocks from body so they don't appear in the ticket body; QA is represented by artifacts only. */
+/** Strip embedded QA blocks (markdown and raw HTML) from body; QA is represented by artifacts only. */
 function stripQAInformationBlockFromBody(bodyMd: string): string {
   if (!bodyMd || !bodyMd.trim()) return bodyMd
   const lines = bodyMd.split('\n')
   const out: string[] = []
   let inQABlock = false
+  let inQAHtmlBlock = false
+  let htmlDepth = 0
+  const qaDivOpen = /<div[^>]*class=["'][^"']*qa-(info-section|section)(?:\s[^"']*)?["'][^>]*>/i
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmed = line.trim()
+    if (inQAHtmlBlock) {
+      const opens = (line.match(/<div[^>]*>/gi) || []).length
+      const closes = (line.match(/<\/div\s*>/gi) || []).length
+      htmlDepth += opens - closes
+      if (htmlDepth <= 0) inQAHtmlBlock = false
+      continue
+    }
+    if (qaDivOpen.test(line)) {
+      inQAHtmlBlock = true
+      htmlDepth = 1
+      const closes = (line.match(/<\/div\s*>/gi) || []).length
+      htmlDepth -= closes
+      if (htmlDepth <= 0) inQAHtmlBlock = false
+      continue
+    }
     const looksLikeQAHeading =
       /^#{1,6}\s*QA\b/i.test(trimmed) ||
       /\*\*QA\s+Information\*\*/i.test(trimmed) ||
