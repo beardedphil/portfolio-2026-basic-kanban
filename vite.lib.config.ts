@@ -12,6 +12,7 @@ export default defineConfig({
       formats: ['es'],
     },
     outDir: 'dist-kanban-lib',
+    cssMinify: false,
     rollupOptions: {
       external: ['react', 'react-dom', 'react/jsx-runtime'],
       output: {
