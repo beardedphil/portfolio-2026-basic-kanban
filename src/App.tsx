@@ -152,7 +152,7 @@ function stripQAInformationBlockFromBody(bodyMd: string): string {
   let inQABlock = false
   let inQAHtmlBlock = false
   let htmlDepth = 0
-  const qaDivOpen = /<div[^>]*class=["'][^"']*qa-(info-section|section)(?:\s[^"']*)?["'][^>]*>/i
+  const qaDivOpen = /<div[^>]*class=["'][^"']*qa-(info-section|section|workflow-section)(?:\s[^"']*)?["'][^>]*>/i
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmed = line.trim()
