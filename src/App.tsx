@@ -144,18 +144,22 @@ function extractFeatureBranch(bodyMd: string | null): string | null {
   return branchMatch ? branchMatch[1].trim() : null
 }
 
-/** Strip every embedded "QA Information" block from body so it appears only once (via QAInfoSection below Artifacts). */
+/** Strip every embedded QA block from body (so only QAInfoSection below Artifacts shows it). Matches "## QA", "## QA Information", "**QA Information**", etc. */
 function stripQAInformationBlockFromBody(bodyMd: string): string {
   if (!bodyMd || !bodyMd.trim()) return bodyMd
-  // Remove block from "## QA Information" (or ###) until next section. Don't stop at "## Implementation artifacts:" (subheading).
   const lines = bodyMd.split('\n')
   const out: string[] = []
   let inQABlock = false
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmed = line.trim()
-    const isQAHeading = /^#{1,6}\s*QA\s+Information\s*$/.test(trimmed) || /^\*\*QA\s+Information\*\*\s*$/.test(trimmed)
-    const isOtherHeading = /^#{1,6}\s/.test(trimmed) && !/^#{1,6}\s*QA\s+Information\s*$/.test(trimmed)
+    const isQAHeading =
+      /^#{1,6}\s*QA\b/.test(trimmed) ||
+      /^\*\*QA\s+Information\*\*\s*$/.test(trimmed)
+    const isOtherHeading =
+      /^#{1,6}\s/.test(trimmed) &&
+      !/^#{1,6}\s*QA\b/.test(trimmed) &&
+      !/^#{1,6}\s*Implementation\s+artifacts\s*:?\s*$/i.test(trimmed)
     if (isQAHeading) {
       inQABlock = true
       continue
