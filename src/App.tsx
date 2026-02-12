@@ -144,6 +144,14 @@ function extractFeatureBranch(bodyMd: string | null): string | null {
   return branchMatch ? branchMatch[1].trim() : null
 }
 
+/** Strip the embedded "QA Information" section from body so it is not duplicated when we show QAInfoSection below. */
+function stripQAInformationBlockFromBody(bodyMd: string): string {
+  if (!bodyMd || !bodyMd.trim()) return bodyMd
+  const qaBlockRegex = /(\n|^)(#{2,3}\s*QA\s+Information[\s\S]*?)(?=\n#{2,3}\s|\n*$)/gi
+  const stripped = bodyMd.replace(qaBlockRegex, (_, before) => before)
+  return stripped.replace(/\n{3,}/g, '\n\n').trim()
+}
+
 /** Check if ticket body_md indicates branch was merged to main. Returns { merged: boolean, timestamp: string | null }. */
 function checkMergedToMain(bodyMd: string | null): { merged: boolean; timestamp: string | null } {
   if (!bodyMd) return { merged: false, timestamp: null }
@@ -993,10 +1001,9 @@ function TicketDetailModal({
 
   const { frontmatter, body: bodyOnly } = body ? parseFrontmatter(body) : { frontmatter: {}, body: '' }
   const priority = body ? extractPriority(frontmatter, body) : null
-  const markdownBody = body ? bodyOnly : ''
+  const markdownBody = body ? stripQAInformationBlockFromBody(bodyOnly) : ''
   const showValidationSection = columnId === 'col-human-in-the-loop'
   const showProcessReviewSection = columnId === 'col-process-review'
-  const showQASection = columnId === 'col-qa'
 
   return (
     <div
@@ -1063,7 +1070,7 @@ function TicketDetailModal({
                 onRefresh={onRefreshArtifacts}
                 refreshing={false}
               />
-              {showQASection && <QAInfoSection bodyMd={body} />}
+              <QAInfoSection bodyMd={body} />
               {showValidationSection && (
                 <HumanValidationSection
                   ticketId={ticketId}
