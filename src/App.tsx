@@ -846,10 +846,24 @@ function ArtifactsSection({
   )
 }
 
-/** QA Info Section: feature branch and merge status when ticket is in QA column (0113). Artifacts are shown only in Artifacts section. */
-function QAInfoSection({ bodyMd }: { bodyMd: string | null }) {
-  const featureBranch = extractFeatureBranch(bodyMd)
-  const mergeStatus = checkMergedToMain(bodyMd)
+/** QA Info Section: feature branch and merge status. Prefers frontmatter (qa_branch, qa_merged_to_main); falls back to parsing body. Artifacts are shown only in Artifacts section. */
+function QAInfoSection({
+  bodyMd,
+  frontmatter = {},
+}: {
+  bodyMd: string | null
+  frontmatter?: Record<string, string>
+}) {
+  const featureBranch =
+    frontmatter.qa_branch != null && frontmatter.qa_branch !== ''
+      ? frontmatter.qa_branch
+      : extractFeatureBranch(bodyMd)
+  const mergedFromFm =
+    frontmatter.qa_merged_to_main != null && frontmatter.qa_merged_to_main !== ''
+      ? /^(yes|true|1)$/i.test(frontmatter.qa_merged_to_main)
+      : null
+  const mergeStatus =
+    mergedFromFm !== null ? { merged: mergedFromFm, timestamp: null } : checkMergedToMain(bodyMd)
 
   return (
     <div className="qa-info-section">
@@ -1090,7 +1104,7 @@ function TicketDetailModal({
                 onRefresh={onRefreshArtifacts}
                 refreshing={false}
               />
-              <QAInfoSection bodyMd={body} />
+              <QAInfoSection bodyMd={body} frontmatter={frontmatter} />
               {showValidationSection && (
                 <HumanValidationSection
                   ticketId={ticketId}
