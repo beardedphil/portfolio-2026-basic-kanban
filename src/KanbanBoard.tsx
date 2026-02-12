@@ -3,6 +3,9 @@
  * HAL owns all data (fetches from Supabase) and passes data + callbacks; no credentials.
  */
 
+/** Build identifier: bump when deploying so HAL can confirm which kanban build is loaded (inspect data-kanban-build on root). Export for HAL diagnostics. */
+export const KANBAN_BUILD = 'b9c73d1'
+
 import React from 'react'
 import { HalKanbanContext, type HalKanbanContextValue } from './HalKanbanContext'
 import type { KanbanTicketRow, KanbanColumnRow, KanbanAgentRunRow } from './types'
@@ -87,7 +90,9 @@ export function KanbanBoard({
 
   return (
     <HalKanbanContext.Provider value={value}>
-      <KanbanBoardInner />
+      <div data-kanban-build={KANBAN_BUILD} style={{ display: 'contents' }}>
+        <KanbanBoardInner />
+      </div>
     </HalKanbanContext.Provider>
   )
 }
