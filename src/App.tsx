@@ -818,28 +818,15 @@ function ArtifactsSection({
   )
 }
 
-/** QA Info Section: displays feature branch and implementation artifacts when ticket is in QA column (0113) */
-function QAInfoSection({
-  bodyMd,
-  artifacts,
-  artifactsLoading,
-  onOpenArtifact,
-}: {
-  bodyMd: string | null
-  artifacts: SupabaseAgentArtifactRow[]
-  artifactsLoading: boolean
-  onOpenArtifact: (artifact: SupabaseAgentArtifactRow) => void
-}) {
+/** QA Info Section: feature branch and merge status when ticket is in QA column (0113). Artifacts are shown only in Artifacts section. */
+function QAInfoSection({ bodyMd }: { bodyMd: string | null }) {
   const featureBranch = extractFeatureBranch(bodyMd)
   const mergeStatus = checkMergedToMain(bodyMd)
-  
-  // Filter to implementation artifacts only
-  const implementationArtifacts = artifacts.filter(a => a.agent_type === 'implementation')
-  
+
   return (
     <div className="qa-info-section">
       <h3 className="qa-info-section-title">QA Information</h3>
-      
+
       <div className="qa-info-field">
         <strong>Feature branch:</strong>{' '}
         {featureBranch ? (
@@ -848,7 +835,7 @@ function QAInfoSection({
           <span className="qa-missing">Not specified</span>
         )}
       </div>
-      
+
       <div className="qa-info-field">
         <strong>Merged to main:</strong>{' '}
         {mergeStatus.merged ? (
@@ -862,39 +849,7 @@ function QAInfoSection({
           <span className="qa-merged-no">❌ No</span>
         )}
       </div>
-      
-      <div className="qa-info-field">
-        <strong>Implementation artifacts:</strong>
-        {artifactsLoading ? (
-          <p className="qa-artifacts-loading">Loading artifacts…</p>
-        ) : implementationArtifacts.length === 0 ? (
-          <p className="qa-artifacts-empty">No implementation artifacts found.</p>
-        ) : (
-          <ul className="qa-artifacts-list">
-            {implementationArtifacts
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-              .map((artifact) => {
-                const displayName = artifact.title || getAgentTypeDisplayName(artifact.agent_type)
-                return (
-                  <li key={artifact.artifact_id} className="qa-artifacts-item">
-                    <button
-                      type="button"
-                      className="qa-artifacts-item-button"
-                      onClick={() => onOpenArtifact(artifact)}
-                      aria-label={`Open ${displayName}`}
-                    >
-                      <span className="qa-artifacts-item-title">{displayName}</span>
-                      <span className="qa-artifacts-item-meta">
-                        {new Date(artifact.created_at).toLocaleString()}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-          </ul>
-        )}
-      </div>
-      
+
       {!mergeStatus.merged && (
         <div className="qa-workflow-warning" role="alert">
           <strong>Warning:</strong> This ticket must be merged to main before it can be moved to Human in the Loop.
@@ -1100,14 +1055,6 @@ function TicketDetailModal({
                   <p className="ticket-detail-empty">No content.</p>
                 )}
               </div>
-              {showQASection && (
-                <QAInfoSection
-                  bodyMd={body}
-                  artifacts={artifacts}
-                  artifactsLoading={artifactsLoading}
-                  onOpenArtifact={onOpenArtifact}
-                />
-              )}
               <ArtifactsSection
                 artifacts={artifacts}
                 loading={artifactsLoading}
@@ -1116,6 +1063,7 @@ function TicketDetailModal({
                 onRefresh={onRefreshArtifacts}
                 refreshing={false}
               />
+              {showQASection && <QAInfoSection bodyMd={body} />}
               {showValidationSection && (
                 <HumanValidationSection
                   ticketId={ticketId}
