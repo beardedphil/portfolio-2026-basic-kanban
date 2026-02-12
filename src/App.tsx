@@ -153,19 +153,21 @@ function stripQAInformationBlockFromBody(bodyMd: string): string {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmed = line.trim()
-    const isQAHeading =
-      /^#{1,6}\s*QA\b/.test(trimmed) ||
-      /^\*\*QA\s+Information\*\*\s*$/.test(trimmed)
-    const isOtherHeading =
+    const looksLikeQAHeading =
+      /^#{1,6}\s*QA\b/i.test(trimmed) ||
+      /\*\*QA\s+Information\*\*/i.test(trimmed) ||
+      /^<h[1-6][^>]*>[\s\S]*QA\s+Information[\s\S]*<\/h[1-6]>/i.test(trimmed) ||
+      (/QA\s+Information/i.test(trimmed) && (trimmed.length < 50 || /^#?\s*\*?\*?/.test(trimmed)))
+    const isOtherSectionHeading =
       /^#{1,6}\s/.test(trimmed) &&
-      !/^#{1,6}\s*QA\b/.test(trimmed) &&
+      !/^#{1,6}\s*QA\b/i.test(trimmed) &&
       !/^#{1,6}\s*Implementation\s+artifacts\s*:?\s*$/i.test(trimmed)
-    if (isQAHeading) {
+    if (looksLikeQAHeading) {
       inQABlock = true
       continue
     }
     if (inQABlock) {
-      if (isOtherHeading) {
+      if (isOtherSectionHeading) {
         inQABlock = false
         out.push(line)
       }
