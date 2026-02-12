@@ -1116,14 +1116,6 @@ function TicketDetailModal({
                 onRefresh={onRefreshArtifacts}
                 refreshing={false}
               />
-              {showQASection && (
-                <QAInfoSection
-                  bodyMd={body}
-                  artifacts={artifacts}
-                  artifactsLoading={artifactsLoading}
-                  onOpenArtifact={onOpenArtifact}
-                />
-              )}
               {showValidationSection && (
                 <HumanValidationSection
                   ticketId={ticketId}
