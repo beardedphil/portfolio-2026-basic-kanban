@@ -4,7 +4,7 @@
  */
 
 /** Build identifier: bump when deploying so HAL can confirm which kanban build is loaded (inspect data-kanban-build on root). Export for HAL diagnostics. */
-export const KANBAN_BUILD = 'b9c73d1'
+export const KANBAN_BUILD = '2095d1c'
 
 import React from 'react'
 import { HalKanbanContext, type HalKanbanContextValue } from './HalKanbanContext'
