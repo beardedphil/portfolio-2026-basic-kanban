@@ -29,6 +29,9 @@ export interface KanbanBoardProps {
   qaAgentTicketId?: string | null
   /** HAL fetches artifacts from DB; called when ticket detail opens. */
   fetchArtifactsForTicket?: (ticketPk: string) => Promise<import('./types').KanbanAgentArtifactRow[]>
+  /** Optional: for API fallback when callback returns empty. */
+  supabaseUrl?: string | null
+  supabaseAnonKey?: string | null
 }
 
 export function KanbanBoard({
@@ -44,6 +47,8 @@ export function KanbanBoard({
   implementationAgentTicketId = null,
   qaAgentTicketId = null,
   fetchArtifactsForTicket,
+  supabaseUrl = null,
+  supabaseAnonKey = null,
 }: KanbanBoardProps) {
   const value: HalKanbanContextValue = React.useMemo(
     () => ({
@@ -59,6 +64,8 @@ export function KanbanBoard({
       implementationAgentTicketId,
       qaAgentTicketId,
       fetchArtifactsForTicket,
+      supabaseUrl,
+      supabaseAnonKey,
     }),
     [
       tickets,
@@ -73,6 +80,8 @@ export function KanbanBoard({
       implementationAgentTicketId,
       qaAgentTicketId,
       fetchArtifactsForTicket,
+      supabaseUrl,
+      supabaseAnonKey,
     ]
   )
 

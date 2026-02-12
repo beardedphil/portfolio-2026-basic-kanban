@@ -35,6 +35,9 @@ export interface HalKanbanContextValue {
   qaAgentTicketId: string | null
   /** HAL fetches artifacts from DB and returns them. Called when ticket detail opens so Kanban can show artifacts. */
   fetchArtifactsForTicket?: (ticketPk: string) => Promise<KanbanAgentArtifactRow[]>
+  /** Optional: Supabase URL/key for API fallback when callback returns empty (e.g. same-origin POST /api/artifacts/get). */
+  supabaseUrl?: string | null
+  supabaseAnonKey?: string | null
 }
 
 export const HalKanbanContext = createContext<HalKanbanContextValue | null>(null)

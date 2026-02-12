@@ -735,16 +735,31 @@ function ArtifactsSection({
   artifacts,
   loading,
   onOpenArtifact,
+  statusMessage = null,
+  onRefresh = undefined,
+  refreshing = false,
 }: {
   artifacts: SupabaseAgentArtifactRow[]
   loading: boolean
   onOpenArtifact: (artifact: SupabaseAgentArtifactRow) => void
+  statusMessage?: string | null
+  onRefresh?: () => void
+  refreshing?: boolean
 }) {
-  if (loading) {
+  const showRefresh = typeof onRefresh === 'function'
+  const isLoading = loading || refreshing
+
+  if (isLoading) {
     return (
       <div className="artifacts-section">
         <h3 className="artifacts-section-title">Artifacts</h3>
         <p className="artifacts-loading">Loading artifacts…</p>
+        {statusMessage && <p className="artifacts-status" role="status">{statusMessage}</p>}
+        {showRefresh && (
+          <button type="button" className="artifacts-refresh-btn" onClick={onRefresh} disabled>
+            Refresh artifacts
+          </button>
+        )}
       </div>
     )
   }
@@ -754,6 +769,12 @@ function ArtifactsSection({
       <div className="artifacts-section">
         <h3 className="artifacts-section-title">Artifacts</h3>
         <p className="artifacts-empty">No artifacts available for this ticket.</p>
+        {statusMessage && <p className="artifacts-status" role="status">{statusMessage}</p>}
+        {showRefresh && (
+          <button type="button" className="artifacts-refresh-btn" onClick={onRefresh}>
+            Refresh artifacts
+          </button>
+        )}
       </div>
     )
   }
@@ -766,6 +787,12 @@ function ArtifactsSection({
   return (
     <div className="artifacts-section">
       <h3 className="artifacts-section-title">Artifacts</h3>
+      {statusMessage && <p className="artifacts-status" role="status">{statusMessage}</p>}
+      {showRefresh && (
+        <button type="button" className="artifacts-refresh-btn" onClick={onRefresh}>
+          Refresh artifacts
+        </button>
+      )}
       <ul className="artifacts-list">
         {sortedArtifacts.map((artifact) => {
           // Use artifact title directly, or fall back to agent type display name
@@ -889,6 +916,8 @@ function TicketDetailModal({
   onRetry,
   artifacts,
   artifactsLoading,
+  artifactsStatus = null,
+  onRefreshArtifacts = undefined,
   onOpenArtifact,
   columnId,
   onValidationPass,
@@ -907,6 +936,8 @@ function TicketDetailModal({
   onRetry?: () => void
   artifacts: SupabaseAgentArtifactRow[]
   artifactsLoading: boolean
+  artifactsStatus?: string | null
+  onRefreshArtifacts?: () => void
   onOpenArtifact: (artifact: SupabaseAgentArtifactRow) => void
   columnId: string | null
   onValidationPass: (ticketPk: string) => Promise<void>
@@ -1081,6 +1112,9 @@ function TicketDetailModal({
                 artifacts={artifacts}
                 loading={artifactsLoading}
                 onOpenArtifact={onOpenArtifact}
+                statusMessage={artifactsStatus}
+                onRefresh={onRefreshArtifacts}
+                refreshing={false}
               />
               {showQASection && (
                 <QAInfoSection
@@ -1494,6 +1528,7 @@ function App() {
   // Agent artifacts (0082)
   const [detailModalArtifacts, setDetailModalArtifacts] = useState<SupabaseAgentArtifactRow[]>([])
   const [detailModalArtifactsLoading, setDetailModalArtifactsLoading] = useState(false)
+  const [detailModalArtifactsStatus, setDetailModalArtifactsStatus] = useState<string | null>(null)
   const [artifactViewer, setArtifactViewer] = useState<SupabaseAgentArtifactRow | null>(null)
   
   // Board data: library mode (halCtx) = HAL passes data down; else = we fetch from Supabase (iframe/standalone)
@@ -1844,6 +1879,7 @@ function App() {
       setDetailModalLoading(false)
       setDetailModalArtifacts([])
       setDetailModalArtifactsLoading(false)
+      setDetailModalArtifactsStatus(null)
       return
     }
     const { ticketId } = detailModal
@@ -1857,28 +1893,60 @@ function App() {
       }
       setDetailModalLoading(false)
       setDetailModalError(null)
-      if (halCtx.fetchArtifactsForTicket) {
-        setDetailModalArtifactsLoading(true)
-        halCtx
-          .fetchArtifactsForTicket(ticketId)
-          .then((data) => setDetailModalArtifacts(data ?? []))
-          .catch((e) => {
-            console.warn('Failed to fetch artifacts (library mode):', e)
-            setDetailModalArtifacts([])
-          })
-          .finally(() => setDetailModalArtifactsLoading(false))
-      } else {
-        // Fallback when HAL has not passed the callback (e.g. older HAL bundle): call HAL API directly
-        setDetailModalArtifactsLoading(true)
-        fetch('/api/artifacts/get', {
+      setDetailModalArtifactsLoading(true)
+      setDetailModalArtifactsStatus('Loading…')
+      const tryApiFallback = (): Promise<SupabaseAgentArtifactRow[]> => {
+        const url = halCtx.supabaseUrl?.trim()
+        const key = halCtx.supabaseAnonKey?.trim()
+        const body: { ticketPk: string; supabaseUrl?: string; supabaseAnonKey?: string } = { ticketPk: ticketId }
+        if (url && key) {
+          body.supabaseUrl = url
+          body.supabaseAnonKey = key
+        }
+        return fetch('/api/artifacts/get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ ticketPk: ticketId }),
+          body: JSON.stringify(body),
         })
           .then((r) => r.json().catch(() => ({})))
-          .then((j: { artifacts?: SupabaseAgentArtifactRow[] }) => setDetailModalArtifacts(Array.isArray(j.artifacts) ? j.artifacts : []))
-          .catch(() => setDetailModalArtifacts([]))
+          .then((j: { artifacts?: SupabaseAgentArtifactRow[] }) => Array.isArray(j.artifacts) ? j.artifacts : [])
+      }
+      if (halCtx.fetchArtifactsForTicket) {
+        halCtx
+          .fetchArtifactsForTicket(ticketId)
+          .then((data) => {
+            const list = data ?? []
+            if (list.length > 0) {
+              setDetailModalArtifacts(list)
+              setDetailModalArtifactsStatus(`Loaded ${list.length} (callback)`)
+              return
+            }
+            return tryApiFallback().then((apiList) => {
+              setDetailModalArtifacts(apiList)
+              setDetailModalArtifactsStatus(apiList.length > 0 ? `Loaded ${apiList.length} (API fallback)` : 'No artifacts (callback empty, API empty)')
+            })
+          })
+          .catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e)
+            console.warn('Failed to fetch artifacts (library mode):', e)
+            setDetailModalArtifactsStatus(`Error: ${msg}`)
+            return tryApiFallback().then((apiList) => {
+              setDetailModalArtifacts(apiList)
+              if (apiList.length > 0) setDetailModalArtifactsStatus(`Loaded ${apiList.length} (API fallback after error)`)
+            })
+          })
+          .finally(() => setDetailModalArtifactsLoading(false))
+      } else {
+        tryApiFallback()
+          .then((apiList) => {
+            setDetailModalArtifacts(apiList)
+            setDetailModalArtifactsStatus(apiList.length > 0 ? `Loaded ${apiList.length} (API)` : 'No artifacts')
+          })
+          .catch(() => {
+            setDetailModalArtifacts([])
+            setDetailModalArtifactsStatus('Error: API request failed')
+          })
           .finally(() => setDetailModalArtifactsLoading(false))
       }
       return
@@ -1914,17 +1982,21 @@ function App() {
         
         // Fetch artifacts (0082)
         setDetailModalArtifactsLoading(true)
+        setDetailModalArtifactsStatus('Loading…')
         fetchTicketArtifacts(ticketId).then((artifacts) => {
           setDetailModalArtifacts(artifacts)
+          setDetailModalArtifactsStatus(artifacts.length > 0 ? `Loaded ${artifacts.length}` : 'No artifacts')
           setDetailModalArtifactsLoading(false)
-        }).catch(() => {
+        }).catch((e) => {
           setDetailModalArtifacts([])
+          setDetailModalArtifactsStatus(`Error: ${e instanceof Error ? e.message : String(e)}`)
           setDetailModalArtifactsLoading(false)
         })
       } else {
         setDetailModalBody('')
         setDetailModalArtifacts([])
         setDetailModalArtifactsLoading(false)
+        setDetailModalArtifactsStatus(null)
       }
       setDetailModalError(null)
       setDetailModalLoading(false)
@@ -1935,8 +2007,84 @@ function App() {
       setDetailModalLoading(false)
       setDetailModalArtifacts([])
       setDetailModalArtifactsLoading(false)
+      setDetailModalArtifactsStatus(null)
     }
   }, [detailModal, halCtx, sourceTickets, supabaseBoardActive, supabaseTickets, supabaseProjectUrl, supabaseAnonKey, detailModalRetryTrigger, addLog, fetchTicketArtifacts])
+
+  /** Re-run artifact fetch for the currently open ticket (library or Supabase mode). */
+  const refreshDetailModalArtifacts = useCallback(() => {
+    if (!detailModal) return
+    const { ticketId } = detailModal
+    if (halCtx) {
+      setDetailModalArtifactsLoading(true)
+      setDetailModalArtifactsStatus('Refreshing…')
+      const tryApiFallback = (): Promise<SupabaseAgentArtifactRow[]> => {
+        const url = halCtx.supabaseUrl?.trim()
+        const key = halCtx.supabaseAnonKey?.trim()
+        const body: { ticketPk: string; supabaseUrl?: string; supabaseAnonKey?: string } = { ticketPk: ticketId }
+        if (url && key) {
+          body.supabaseUrl = url
+          body.supabaseAnonKey = key
+        }
+        return fetch('/api/artifacts/get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        })
+          .then((r) => r.json().catch(() => ({})))
+          .then((j: { artifacts?: SupabaseAgentArtifactRow[] }) => Array.isArray(j.artifacts) ? j.artifacts : [])
+      }
+      if (halCtx.fetchArtifactsForTicket) {
+        halCtx
+          .fetchArtifactsForTicket(ticketId)
+          .then((data) => {
+            const list = data ?? []
+            if (list.length > 0) {
+              setDetailModalArtifacts(list)
+              setDetailModalArtifactsStatus(`Loaded ${list.length} (callback)`)
+              return
+            }
+            return tryApiFallback().then((apiList) => {
+              setDetailModalArtifacts(apiList)
+              setDetailModalArtifactsStatus(apiList.length > 0 ? `Loaded ${apiList.length} (API fallback)` : 'No artifacts (callback empty, API empty)')
+            })
+          })
+          .catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e)
+            setDetailModalArtifactsStatus(`Error: ${msg}`)
+            return tryApiFallback().then((apiList) => {
+              setDetailModalArtifacts(apiList)
+              if (apiList.length > 0) setDetailModalArtifactsStatus(`Loaded ${apiList.length} (API fallback after error)`)
+            })
+          })
+          .finally(() => setDetailModalArtifactsLoading(false))
+      } else {
+        tryApiFallback()
+          .then((apiList) => {
+            setDetailModalArtifacts(apiList)
+            setDetailModalArtifactsStatus(apiList.length > 0 ? `Loaded ${apiList.length} (API)` : 'No artifacts')
+          })
+          .catch(() => {
+            setDetailModalArtifacts([])
+            setDetailModalArtifactsStatus('Error: API request failed')
+          })
+          .finally(() => setDetailModalArtifactsLoading(false))
+      }
+    } else if (supabaseBoardActive) {
+      setDetailModalArtifactsLoading(true)
+      setDetailModalArtifactsStatus('Refreshing…')
+      fetchTicketArtifacts(ticketId).then((artifacts) => {
+        setDetailModalArtifacts(artifacts)
+        setDetailModalArtifactsStatus(artifacts.length > 0 ? `Loaded ${artifacts.length}` : 'No artifacts')
+        setDetailModalArtifactsLoading(false)
+      }).catch((e) => {
+        setDetailModalArtifacts([])
+        setDetailModalArtifactsStatus(`Error: ${e instanceof Error ? e.message : String(e)}`)
+        setDetailModalArtifactsLoading(false)
+      })
+    }
+  }, [detailModal, halCtx, supabaseBoardActive, fetchTicketArtifacts])
 
   const handleOpenTicketDetail = useCallback(
     (cardId: string) => {
@@ -3066,6 +3214,8 @@ function App() {
           onRetry={detailModalError ? handleRetryTicketDetail : undefined}
           artifacts={detailModalArtifacts}
           artifactsLoading={detailModalArtifactsLoading}
+          artifactsStatus={detailModalArtifactsStatus}
+          onRefreshArtifacts={refreshDetailModalArtifacts}
           onOpenArtifact={handleOpenArtifact}
           columnId={detailModal.columnId}
           supabaseUrl={supabaseProjectUrl || ''}

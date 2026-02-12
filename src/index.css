@@ -1069,6 +1069,32 @@ h1 {
   font-style: italic;
   font-size: 0.9rem;
 }
+
+.artifacts-status {
+  margin: 0.25rem 0 0.5rem 0;
+  color: var(--kanban-text-muted);
+  font-size: 0.8rem;
+}
+
+.artifacts-refresh-btn {
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--kanban-text);
+  background: var(--kanban-bg-elevated);
+  border: 1px solid var(--kanban-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.artifacts-refresh-btn:hover:not(:disabled) {
+  background: var(--kanban-bg-hover);
+}
+
+.artifacts-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .artifacts-list {
   list-style: none;
   padding: 0;
