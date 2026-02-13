@@ -870,6 +870,190 @@ function ArtifactsSection({
   )
 }
 
+/** Move ticket to another repo dialog */
+function MoveToRepoDialog({
+  open,
+  onClose,
+  ticketId,
+  ticketTitle,
+  availableRepos,
+  currentRepoFullName,
+  onMove,
+}: {
+  open: boolean
+  onClose: () => void
+  ticketId: string
+  ticketTitle: string
+  availableRepos: string[]
+  currentRepoFullName: string | null
+  onMove: (targetRepoFullName: string) => Promise<void>
+}) {
+  const [selectedRepo, setSelectedRepo] = useState<string>('')
+  const [isMoving, setIsMoving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
+  const closeBtnRef = useRef<HTMLButtonElement>(null)
+
+  // Filter out current repo from available repos
+  const filteredRepos = availableRepos.filter((repo) => repo !== currentRepoFullName)
+
+  // Scroll lock when open
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [open])
+
+  // Focus first focusable (close button) when open; focus trap
+  useEffect(() => {
+    if (!open || !modalRef.current) return
+    const el = closeBtnRef.current ?? modalRef.current.querySelector<HTMLElement>('button, [href], input, select, textarea')
+    el?.focus()
+  }, [open])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab' || !modalRef.current) return
+      const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+      const list = Array.from(focusable)
+      const first = list[0]
+      const last = list[list.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault()
+          last?.focus()
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault()
+          first?.focus()
+        }
+      }
+    },
+    [onClose]
+  )
+
+  const handleMove = useCallback(async () => {
+    if (!selectedRepo || isMoving) return
+    setIsMoving(true)
+    setError(null)
+    try {
+      await onMove(selectedRepo)
+      // Success - the parent component will handle closing and showing success message
+      onClose()
+      setSelectedRepo('')
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to move ticket. Please check your access to the target repository and try again.'
+      setError(errorMessage)
+      setIsMoving(false)
+    }
+  }, [selectedRepo, isMoving, onMove, onClose])
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!open) {
+      setSelectedRepo('')
+      setIsMoving(false)
+      setError(null)
+    }
+  }, [open])
+
+  if (!open) return null
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="move-to-repo-title"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="modal" ref={modalRef}>
+        <div className="modal-header">
+          <h2 id="move-to-repo-title" className="modal-title">Move to another repo's To Do</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={onClose}
+            ref={closeBtnRef}
+            aria-label="Close"
+            disabled={isMoving}
+          >
+            Close
+          </button>
+        </div>
+
+        <p className="modal-subtitle">
+          Move ticket <strong>{ticketTitle}</strong> (ID: {ticketId}) to the <strong>To Do</strong> column of another repository.
+        </p>
+
+        {filteredRepos.length === 0 ? (
+          <div className="ticket-detail-error" role="alert">
+            <p>No other repositories available. Connect additional repositories to move tickets between them.</p>
+          </div>
+        ) : (
+          <>
+            <div className="modal-grid">
+              <label className="field">
+                <span className="field-label">Target Repository</span>
+                <select
+                  className="field-input"
+                  value={selectedRepo}
+                  onChange={(e) => setSelectedRepo(e.target.value)}
+                  disabled={isMoving}
+                  aria-label="Select target repository"
+                >
+                  <option value="">-- Select a repository --</option>
+                  {filteredRepos.map((repo) => (
+                    <option key={repo} value={repo}>
+                      {repo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {error && (
+              <div className="ticket-detail-error" role="alert">
+                <p>{error}</p>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={handleMove}
+                disabled={!selectedRepo || isMoving}
+                aria-label="Confirm move to selected repository"
+              >
+                {isMoving ? 'Moving...' : 'Move Ticket'}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isMoving}
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** Ticket detail modal (0033): title, metadata, markdown body, close/escape/backdrop, scroll lock, focus trap */
 function TicketDetailModal({
   open,
@@ -911,10 +1095,15 @@ function TicketDetailModal({
   supabaseUrl: string
   supabaseKey: string
   onTicketUpdate: () => void
+  onMoveTicketToRepo?: (ticketPk: string, targetRepoFullName: string) => Promise<void>
+  availableRepos?: string[]
 }) {
+  const halCtx = useContext(HalKanbanContext)
   const [validationSteps, setValidationSteps] = useState('')
   const [validationNotes, setValidationNotes] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [moveToRepoDialogOpen, setMoveToRepoDialogOpen] = useState(false)
+  const [moveToRepoMessage, setMoveToRepoMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const closeBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -997,8 +1186,27 @@ function TicketDetailModal({
       setValidationSteps('')
       setValidationNotes('')
       setIsProcessing(false)
+      setMoveToRepoDialogOpen(false)
+      setMoveToRepoMessage(null)
     }
   }, [open])
+
+  const handleMoveToRepo = useCallback(async (targetRepoFullName: string) => {
+    if (!onMoveTicketToRepo) return
+    try {
+      await onMoveTicketToRepo(ticketId, targetRepoFullName)
+      setMoveToRepoMessage({ type: 'success', text: `Ticket moved to ${targetRepoFullName}'s To Do column successfully.` })
+      // Close dialog after successful move
+      setMoveToRepoDialogOpen(false)
+      // Close ticket detail modal after a short delay to show success message
+      setTimeout(() => {
+        onClose()
+      }, 1500)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to move ticket. Please check your access to the target repository and try again.'
+      setMoveToRepoMessage({ type: 'error', text: errorMessage })
+    }
+  }, [ticketId, onMoveTicketToRepo, onClose])
 
   if (!open) return null
 
@@ -1035,7 +1243,33 @@ function TicketDetailModal({
         <div className="ticket-detail-meta">
           <span className="ticket-detail-id">ID: {ticketId}</span>
           {priority != null && <span className="ticket-detail-priority">Priority: {priority}</span>}
+          {onMoveTicketToRepo && availableRepos && availableRepos.filter((repo) => repo !== halCtx?.repoFullName).length > 0 && (
+            <button
+              type="button"
+              className="ticket-detail-move-repo-btn"
+              onClick={() => setMoveToRepoDialogOpen(true)}
+              aria-label="Move to another repo's To Do"
+            >
+              Move to another repo's To Do
+            </button>
+          )}
         </div>
+        {moveToRepoMessage && (
+          <div
+            className={moveToRepoMessage.type === 'success' ? 'ticket-detail-success' : 'ticket-detail-error'}
+            role="alert"
+            style={{ margin: '0.5rem 1rem' }}
+          >
+            <p>{moveToRepoMessage.text}</p>
+            <button
+              type="button"
+              onClick={() => setMoveToRepoMessage(null)}
+              style={{ marginTop: '0.5rem', padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <div className="ticket-detail-body-wrap">
           {loading && <p className="ticket-detail-loading">Loading…</p>}
           {error && (
@@ -1099,6 +1333,17 @@ function TicketDetailModal({
           )}
         </div>
       </div>
+      {onMoveTicketToRepo && availableRepos && (
+        <MoveToRepoDialog
+          open={moveToRepoDialogOpen}
+          onClose={() => setMoveToRepoDialogOpen(false)}
+          ticketId={ticketId}
+          ticketTitle={title}
+          availableRepos={availableRepos}
+          currentRepoFullName={halCtx?.repoFullName || null}
+          onMove={handleMoveToRepo}
+        />
+      )}
     </div>
   )
 }
@@ -3282,6 +3527,8 @@ ${notes || '(none provided)'}
             }, REFETCH_AFTER_MOVE_MS + 100)
           }}
           onTicketUpdate={refetchSupabaseTickets}
+          onMoveTicketToRepo={halCtx?.onMoveTicketToRepo}
+          availableRepos={halCtx?.availableRepos}
         />
       )}
 

@@ -35,6 +35,10 @@ export interface KanbanBoardProps {
   /** Optional: for API fallback when callback returns empty. */
   supabaseUrl?: string | null
   supabaseAnonKey?: string | null
+  /** Called when user moves a ticket to another repository's To Do column. HAL updates Supabase and passes new data. */
+  onMoveTicketToRepo?: (ticketPk: string, targetRepoFullName: string) => Promise<void>
+  /** List of available repositories the user has access to (for move-to-repo dialog). */
+  availableRepos?: string[]
 }
 
 export function KanbanBoard({
@@ -52,6 +56,8 @@ export function KanbanBoard({
   fetchArtifactsForTicket,
   supabaseUrl = null,
   supabaseAnonKey = null,
+  onMoveTicketToRepo,
+  availableRepos = [],
 }: KanbanBoardProps) {
   const value: HalKanbanContextValue = React.useMemo(
     () => ({
@@ -69,6 +75,8 @@ export function KanbanBoard({
       fetchArtifactsForTicket,
       supabaseUrl,
       supabaseAnonKey,
+      onMoveTicketToRepo,
+      availableRepos,
     }),
     [
       tickets,
@@ -85,6 +93,8 @@ export function KanbanBoard({
       fetchArtifactsForTicket,
       supabaseUrl,
       supabaseAnonKey,
+      onMoveTicketToRepo,
+      availableRepos,
     ]
   )
 
