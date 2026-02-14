@@ -463,6 +463,52 @@ h1 {
 .ticket-detail-id {
   font-family: ui-monospace, monospace;
 }
+.ticket-detail-move-repo-btn {
+  margin-left: auto;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.85rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+.ticket-detail-move-repo-btn:hover {
+  background: #0056b3;
+}
+.ticket-detail-move-repo-btn:focus {
+  outline: 2px solid #007bff;
+  outline-offset: 2px;
+}
+.ticket-detail-move-repo-btn:active {
+  background: #004085;
+}
+.ticket-detail-success {
+  padding: 0.75rem 1rem;
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  color: #155724;
+  margin: 0.5rem 1rem;
+}
+.ticket-detail-success p {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+}
+.ticket-detail-success button {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ticket-detail-success button:hover {
+  background: #218838;
+}
 .ticket-detail-body-wrap {
   flex: 1;
   min-height: 0;

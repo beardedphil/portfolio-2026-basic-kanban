@@ -38,6 +38,10 @@ export interface HalKanbanContextValue {
   /** Optional: Supabase URL/key for API fallback when callback returns empty (e.g. same-origin POST /api/artifacts/get). */
   supabaseUrl?: string | null
   supabaseAnonKey?: string | null
+  /** Called when user moves a ticket to another repository's To Do column. HAL updates Supabase and passes new data. */
+  onMoveTicketToRepo?: (ticketPk: string, targetRepoFullName: string) => Promise<void>
+  /** List of available repositories the user has access to (for move-to-repo dialog). */
+  availableRepos?: string[]
 }
 
 export const HalKanbanContext = createContext<HalKanbanContextValue | null>(null)
