@@ -2,10 +2,19 @@
 
 Create a new file at `docs/tickets/<task-id>-<short-title>.md` using this template.
 
+**Note**: If this is a **failed ticket being retried**, see the "⚠️ FAILURE HISTORY" section below and ensure all failure markers are present.
+
+```yaml
+---
+kanbanColumnId: col-todo
+status: new
+---
+```
+
 ## Ticket
 
 - **ID**: `<task-id>`
-- **Title**: `<short title>`
+- **Title**: `<short title>` (if retrying a failed ticket, prefix with `[FAILED]` or `[RETRY]`)
 - **Owner**: Implementation agent
 - **Type**: Feature / Bug / Chore
 - **Priority**: P0 / P1 / P2
@@ -14,6 +23,17 @@ Create a new file at `docs/tickets/<task-id>-<short-title>.md` using this templa
 
 - **Fixes**: `<ticket-id>` (required for bugfix tickets)
 - **Category**: DnD / State / CSS / Build / Process / Other (required for bugfix tickets)
+
+## ⚠️ FAILURE HISTORY (required if this ticket failed before)
+
+**ONLY include this section if this ticket has failed verification and is being retried.**
+
+- **Failed attempt count**: <number>
+- **Last failed**: <date>
+- **Why it failed**: <clear, specific explanation of what didn't work>
+- **What was attempted**: <brief summary of the previous implementation approach>
+- **Previous audit**: `docs/audit/<task-id>-<short-title>/` (review `pm-review.md` and `verification.md` for details)
+- **Key learnings**: <what we learned from the failure that should inform the retry>
 
 ## Goal (one sentence)
 
@@ -39,9 +59,16 @@ Create a new file at `docs/tickets/<task-id>-<short-title>.md` using this templa
 
 - <explicitly out of scope>
 
+## QA failure summary (required for bugfix/retry tickets)
+
+- <what failed, in human terms>
+- <expected vs actual behavior>
+- <specific acceptance criteria that failed>
+
 ## Implementation notes (optional)
 
 - <hints, suspected cause, suggested approach>
+- **If retrying a failed ticket**: explicitly reference the failure history above and explain how this attempt differs from the previous one
 
 ## Audit artifacts required (implementation agent)
 
