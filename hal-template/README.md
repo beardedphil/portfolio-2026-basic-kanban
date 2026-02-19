@@ -4,7 +4,7 @@ This folder is the **reusable scaffold** for new HAL projects.
 
 ## What it contains
 
-- `.cursor/rules/` — workspace agent rules (copied into each new project repo)
+- `.cursor/rules/SUPABASE_RULES.mdc` — single rule pointing to Supabase; agents fetch rules from there
 - `docs/` — tickets, audit artifacts, and templates
 - `scripts/sync-tickets.js` — sync `docs/tickets/*.md` ↔ Supabase `tickets` table
 - `.env.example` — required env keys for Supabase (frontend + scripts)

@@ -41,4 +41,4 @@ We will expand these rules as we learn.
 
 ## Where to put new verification rules
 
-Add new rules here as additional sections. If a rule needs enforcing at agent-time, we can later mirror it into `.cursor/rules/`.
+Add new rules here as additional sections. If a rule needs enforcing at agent-time, add it to Supabase (rules live there).

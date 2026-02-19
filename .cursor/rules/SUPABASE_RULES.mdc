@@ -1,0 +1,20 @@
+---
+description: Rules live in Supabase — fetch basic instructions and request more as needed
+alwaysApply: true
+---
+
+# Rules Live in Supabase
+
+All agent rules are stored in **Supabase**, not in `.cursor/rules`. This file is the only local rule; it tells you where to get the rest.
+
+## How to access rules
+
+1. **Connect to Supabase** using your project's credentials (`SUPABASE_URL`, `SUPABASE_ANON_KEY` from `.env` or HAL config).
+2. **Fetch rules** from Supabase — structure is defined there. Start with the base/global rules.
+3. **Request more rules** for specific scenarios when needed (e.g. ticket writing, moving tickets, PM handoff, implementation agent tasks). Ask for rules by scenario or context.
+
+## Basic instructions
+
+- Follow the rules you fetch from Supabase.
+- When a task requires scenario-specific guidance, request those rules from Supabase before proceeding.
+- Do not add or edit rules in `.cursor/rules` — rules live in Supabase only.

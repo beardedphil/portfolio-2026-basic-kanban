@@ -2388,14 +2388,7 @@ function App() {
       'docs/templates/agent-task-prompt.template.md',
       'docs/tickets/README.md',
       'docs/audit/README.md',
-      '.cursor/rules/auditability-and-traceability.mdc',
-      '.cursor/rules/bugfix-tracking.mdc',
-      '.cursor/rules/build-config-hygiene.mdc',
-      '.cursor/rules/conversation-protocol.mdc',
-      '.cursor/rules/done-means-pushed.mdc',
-      '.cursor/rules/scope-discipline.mdc',
-      '.cursor/rules/task-sizing-and-in-app-debugging.mdc',
-      '.cursor/rules/ticket-writing-sync-tickets.mdc',
+      '.cursor/rules/SUPABASE_RULES.mdc',
     ]
 
     const written: string[] = []
@@ -3044,7 +3037,7 @@ function App() {
                   checked={newHalChecklist.copiedScaffold}
                   onChange={(e) => setNewHalChecklist((p) => ({ ...p, copiedScaffold: e.target.checked }))}
                 />
-                <span>Copied scaffold (`.cursor/rules`, `docs/`, `scripts/sync-tickets.js`, `.env.example`)</span>
+                <span>Copied scaffold (`.cursor/rules/SUPABASE_RULES.mdc`, `docs/`, `scripts/sync-tickets.js`, `.env.example`)</span>
               </label>
               <label className="check">
                 <input
