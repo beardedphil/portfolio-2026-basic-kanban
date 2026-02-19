@@ -1,0 +1,39 @@
+---
+description: Correct API for Project Manager to move tickets (C686)
+alwaysApply: true
+---
+
+# Ticket Move API (Project Manager)
+
+When the Project Manager agent needs to move a ticket to another kanban column, use:
+
+**Endpoint:** `POST /api/tickets/move`
+
+**Request body:**
+```json
+{
+  "ticketPk": "<uuid>",
+  "columnId": "<column-id>",
+  "position": 0
+}
+```
+
+## Critical: Use `ticketPk`, not `id`
+
+- **`ticketPk`** — UUID primary key from the `tickets` table (e.g. `a1b2c3d4-...`). This is the correct identifier.
+- **Do NOT use** `id`, `ticketId`, or `display_id` (e.g. `HAL-0084`) — these will fail.
+
+## Column IDs
+
+- `col-unassigned`, `col-todo`, `col-doing`, `col-qa`, `col-human-in-the-loop`, `col-process-review`, `col-done`, `col-wont-implement`
+- Or custom column IDs from `kanban_columns`.
+
+## Position
+
+- Optional. Zero-based index within the target column. Omit to append at end.
+
+## Wrong endpoints to avoid
+
+- Do **not** use `PATCH /api/tickets/:id` (uses display id, wrong)
+- Do **not** use `POST /api/ticket/move` (singular, wrong path)
+- Do **not** use `PUT /api/tickets/update` (wrong method/path)
