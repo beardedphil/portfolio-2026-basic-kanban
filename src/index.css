@@ -463,6 +463,10 @@ h1 {
 .ticket-detail-id {
   font-family: ui-monospace, monospace;
 }
+
+.ticket-detail-metric {
+  color: var(--text-muted, #666);
+}
 .ticket-detail-body-wrap {
   flex: 1;
   min-height: 0;
