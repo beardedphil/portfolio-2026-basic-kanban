@@ -16,6 +16,10 @@ export interface KanbanTicketRow {
   repo_full_name?: string
   ticket_number?: number
   display_id?: string
+  /** Test coverage percentage 0–100 (from Process Review agent). */
+  test_coverage?: number | null
+  /** Simplicity percentage 0–100 (from Process Review agent). */
+  simplicity?: number | null
 }
 
 /** Kanban column row (matches Supabase kanban_columns table). */

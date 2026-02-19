@@ -56,6 +56,10 @@ type SupabaseTicketRow = {
   ticket_number?: number
   /** Human-facing display id like HAL-0079 (0079). */
   display_id?: string
+  /** Test coverage percentage 0–100 (from Process Review agent). */
+  test_coverage?: number | null
+  /** Simplicity percentage 0–100 (from Process Review agent). */
+  simplicity?: number | null
 }
 
 /** Supabase kanban_columns table row (0020) */
@@ -226,6 +230,8 @@ function normalizeTicketRow(row: Partial<SupabaseTicketRow> & { id?: string }): 
     typeof row.display_id === 'string' && row.display_id.trim()
       ? row.display_id.trim()
       : `LEG-${legacyId.padStart(4, '0')}`
+  const testCoverage = typeof row.test_coverage === 'number' ? row.test_coverage : null
+  const simplicity = typeof row.simplicity === 'number' ? row.simplicity : null
   return {
     pk,
     id: legacyId,
@@ -239,6 +245,8 @@ function normalizeTicketRow(row: Partial<SupabaseTicketRow> & { id?: string }): 
     repo_full_name: row.repo_full_name,
     ticket_number: row.ticket_number,
     display_id: displayId,
+    test_coverage: testCoverage,
+    simplicity,
   }
 }
 
@@ -571,12 +579,15 @@ function ProcessReviewSection({
   artifacts,
   supabaseUrl,
   supabaseAnonKey,
+  onMetricsUpdate,
 }: {
   ticketId: string
   ticketPk: string
   artifacts: SupabaseAgentArtifactRow[]
   supabaseUrl?: string
   supabaseAnonKey?: string
+  /** Called when Process Review API returns test_coverage/simplicity; persists to DB. */
+  onMetricsUpdate?: (testCoverage: number | null, simplicity: number | null) => Promise<void>
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ id: string; text: string; selected: boolean }>>([])
   const [isRunningReview, setIsRunningReview] = useState(false)
@@ -621,6 +632,15 @@ function ProcessReviewSection({
         selected: false,
       }))
       setSuggestions(suggestionsList)
+
+      // Persist Test Coverage and Simplicity to DB when API returns them (keeps UI in sync with agent)
+      const tc = typeof result.test_coverage === 'number' ? result.test_coverage : null
+      const sim = typeof result.simplicity === 'number' ? result.simplicity : null
+      if (onMetricsUpdate && (tc != null || sim != null)) {
+        onMetricsUpdate(tc, sim).catch((err) => {
+          console.warn('Failed to persist metrics:', err)
+        })
+      }
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : 'Failed to run review')
     } finally {
@@ -877,6 +897,8 @@ function TicketDetailModal({
   ticketId,
   title,
   body,
+  testCoverage,
+  simplicity,
   loading,
   error,
   onRetry,
@@ -891,12 +913,15 @@ function TicketDetailModal({
   supabaseUrl,
   supabaseKey,
   onTicketUpdate: _onTicketUpdate,
+  onMetricsUpdate,
 }: {
   open: boolean
   onClose: () => void
   ticketId: string
   title: string
   body: string | null
+  testCoverage?: number | null
+  simplicity?: number | null
   loading: boolean
   error: string | null
   onRetry?: () => void
@@ -911,6 +936,7 @@ function TicketDetailModal({
   supabaseUrl: string
   supabaseKey: string
   onTicketUpdate: () => void
+  onMetricsUpdate?: (testCoverage: number | null, simplicity: number | null) => Promise<void>
 }) {
   const [validationSteps, setValidationSteps] = useState('')
   const [validationNotes, setValidationNotes] = useState('')
@@ -1035,6 +1061,12 @@ function TicketDetailModal({
         <div className="ticket-detail-meta">
           <span className="ticket-detail-id">ID: {ticketId}</span>
           {priority != null && <span className="ticket-detail-priority">Priority: {priority}</span>}
+          {typeof testCoverage === 'number' && (
+            <span className="ticket-detail-metric">Test Coverage: {testCoverage}%</span>
+          )}
+          {typeof simplicity === 'number' && (
+            <span className="ticket-detail-metric">Simplicity: {simplicity}%</span>
+          )}
         </div>
         <div className="ticket-detail-body-wrap">
           {loading && <p className="ticket-detail-loading">Loading…</p>}
@@ -1093,6 +1125,7 @@ function TicketDetailModal({
                   artifacts={artifacts}
                   supabaseUrl={supabaseUrl}
                   supabaseAnonKey={supabaseKey}
+                  onMetricsUpdate={onMetricsUpdate}
                 />
               )}
             </>
@@ -1578,7 +1611,7 @@ function App() {
       if (connectedRepoFullName) {
         const r = await client
           .from('tickets')
-          .select('pk, id, repo_full_name, ticket_number, display_id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+          .select('pk, id, repo_full_name, ticket_number, display_id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at, test_coverage, simplicity')
           .eq('repo_full_name', connectedRepoFullName)
           .order('ticket_number', { ascending: true })
         rows = (r.data ?? null) as unknown[] | null
@@ -2080,7 +2113,7 @@ function App() {
       if (connectedRepoFullName) {
         const r = await client
           .from('tickets')
-          .select('pk, id, repo_full_name, ticket_number, display_id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at')
+          .select('pk, id, repo_full_name, ticket_number, display_id, filename, title, body_md, kanban_column_id, kanban_position, kanban_moved_at, updated_at, test_coverage, simplicity')
           .eq('repo_full_name', connectedRepoFullName)
           .order('ticket_number', { ascending: true })
         rows = (r.data ?? null) as unknown[] | null
@@ -2177,7 +2210,13 @@ function App() {
   const updateSupabaseTicketKanban = useCallback(
     async (
       pk: string,
-      updates: { kanban_column_id?: string; kanban_position?: number; kanban_moved_at?: string }
+      updates: {
+        kanban_column_id?: string
+        kanban_position?: number
+        kanban_moved_at?: string
+        test_coverage?: number | null
+        simplicity?: number | null
+      }
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       const url = supabaseProjectUrl.trim()
       const key = supabaseAnonKey.trim()
@@ -3158,6 +3197,8 @@ function App() {
           ticketId={detailModal.ticketId}
           title={detailModal.title}
           body={detailModalBody}
+          testCoverage={sourceTickets.find((t) => t.pk === detailModal.ticketId)?.test_coverage}
+          simplicity={sourceTickets.find((t) => t.pk === detailModal.ticketId)?.simplicity}
           loading={detailModalLoading}
           error={detailModalError}
           onRetry={detailModalError ? handleRetryTicketDetail : undefined}
@@ -3169,6 +3210,17 @@ function App() {
           columnId={detailModal.columnId}
           supabaseUrl={supabaseProjectUrl || ''}
           supabaseKey={supabaseAnonKey || ''}
+          onMetricsUpdate={
+            supabaseBoardActive && updateSupabaseTicketKanban
+              ? async (tc, sim) => {
+                  const result = await updateSupabaseTicketKanban(detailModal.ticketId, {
+                    test_coverage: tc,
+                    simplicity: sim,
+                  })
+                  if (result.ok) refetchSupabaseTickets(false)
+                }
+              : undefined
+          }
           onValidationPass={async (ticketPk: string) => {
             // Move ticket to Process Review (0108)
             const targetColumn = supabaseColumns.find((c) => c.id === 'col-process-review')
