@@ -1212,7 +1212,7 @@ function SortableColumn({
     if (col.id === 'col-unassigned') {
       return { label: 'Prepare top ticket', chatTarget: 'project-manager', message: `Please prepare ticket ${ticketRef} and get it ready (Definition of Ready).` }
     } else if (col.id === 'col-todo') {
-      return { label: 'Implement top ticket', chatTarget: 'implementation-agent', message: `Implement ticket ${ticketRef}.` }
+      return { label: 'Implement top ticket', chatTarget: 'implementation-agent', message: `Implement ticket ${ticketRef}. Create a PR if one doesn't exist yet — do not prompt me to create one.` }
     } else if (col.id === 'col-qa') {
       return { label: 'QA top ticket', chatTarget: 'qa-agent', message: `QA ticket ${ticketRef}.` }
     }
