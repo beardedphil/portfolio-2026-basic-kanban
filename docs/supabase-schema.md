@@ -17,6 +17,18 @@ create table if not exists public.tickets (
 );
 ```
 
+### Migration: test_coverage and simplicity (metrics)
+
+Run in Supabase SQL editor to add Test Coverage and Simplicity percentages (0–100, nullable). These are updated automatically when the Process Review agent returns new values.
+
+```sql
+alter table public.tickets
+  add column if not exists test_coverage int null,
+  add column if not exists simplicity int null;
+```
+
+**API contract:** The `/api/process-review/run` endpoint should return `test_coverage` and `simplicity` (numbers 0–100) in its JSON response when the agent produces them. The Kanban app persists these to the DB and displays them in the ticket detail modal.
+
 ## kanban_columns (0020)
 
 ```sql
