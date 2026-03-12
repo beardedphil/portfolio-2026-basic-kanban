@@ -23,3 +23,13 @@ This file is for future PM agents working in this repo.
 
 - Tickets may be *discovered* in one repo but *implemented* in another (e.g. HAL finds a kanban bug that belongs in the kanban repo). Keep the ticket where it was discovered, but ensure implementation artifacts live with the code changes.
 
+## Failed ticket handling
+
+- **When a ticket fails verification/QA and is returned to To-do**, you **MUST** update the ticket file with all required failure markers (see `.cursor/rules/bugfix-tracking.mdc`):
+  - Prefix title with `[FAILED]` or `[RETRY]`
+  - Add frontmatter: `status: failed`, `failedAttempts`, `lastFailedAt`
+  - Add prominent "⚠️ FAILURE HISTORY" section with failure details
+  - Update "QA failure summary" with specific failure observations
+  - Update "Implementation notes" to reference the failure and previous attempt
+- **Never return a failed ticket to To-do without these markers** — implementation agents must immediately see it's a retry, not a fresh ticket.
+

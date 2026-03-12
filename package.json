@@ -18,7 +18,9 @@
     "build": "tsc -b && vite build",
     "build:lib": "vite build --config vite.lib.config.ts",
     "preview": "vite preview",
-    "sync-tickets": "node scripts/sync-tickets.js"
+    "sync-tickets": "node scripts/sync-tickets.js",
+    "update-failed-tickets": "node scripts/update-failed-tickets.js",
+    "update-failed-tickets-api": "node scripts/update-failed-tickets-api.js"
   },
   "peerDependencies": {
     "react": "^18.0.0",
